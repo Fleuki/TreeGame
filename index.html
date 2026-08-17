@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111820">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Лесорубы — дуэль</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden; background:#111820;
+    -webkit-user-select:none; user-select:none;
+    -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent;
+    touch-action:none; overscroll-behavior:none;
+  }
+  canvas { display:block; width:100%; height:100%; touch-action:none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+"use strict";
+
+/* =========================================================================
+   ЛЕСОРУБЫ — дуэль на одном экране
+   Один файл, без сборки и внешних зависимостей.
+   Разделы: ПАЛИТРА · КОНСТАНТЫ · СОСТОЯНИЕ · ЗВУК · ГЕНЕРАЦИЯ ДЕРЕВА ·
+            РАЗМЕТКА · ВВОД · ЛОГИКА · БОТ · ОТРИСОВКА · ЦИКЛ
+   ========================================================================= */
+
+
+/* =========================================================================
+   1. ПАЛИТРА  — всё, что красится, живёт здесь.
+      Арт следующего этапа меняет цвета тут и тела draw*-функций ниже.
+   ========================================================================= */
+const PALETTE = {
+  skyTop:      '#243447',
+  skyBottom:   '#151f2b',
+  zoneA:       '#1d2a3a',
+  zoneB:       '#18242f',
+  zoneEdge:    '#0d131a',
+  divider:     '#0b1017',
+
+  ground:      '#33503a',
+  groundDark:  '#223527',
+  groundLine:  '#3e6144',
+
+  trunk:       '#8a5a34',
+  trunkLight:  '#a06b3f',
+  trunkDark:   '#6a4324',
+  trunkRing:   '#5a3a1f',
+
+  branch:      '#7a4b2b',
+  branchDark:  '#5b3720',
+  leaf:        '#3f8149',
+  leafDark:    '#2e6236',
+
+  skin:        '#f2c496',
+  hair:        '#4a3324',
+  shirt:       '#d8483f',
+  shirtDark:   '#a63329',
+  pants:       '#33506f',
+  boots:       '#2a2119',
+  axeHandle:   '#b8813f',
+  axeBlade:    '#d5dde5',
+  axeBladeDark:'#98a5b0',
+
+  chip:        '#c9924e',
+  chipDark:    '#9c6c34',
+
+  text:        '#eef3f8',
+  textDim:     '#8ba0b6',
+  accent:      '#f2b134',
+  danger:      '#e94b3c',
+  ok:          '#4fc06a',
+
+  btn:         '#27384c',
+  btnHi:       '#35506d',
+  btnBorder:   '#4f7396',
+
+  flash:       '#ffffff',
+  stunTint:    '#e94b3c'
+};
+
+
+/* =========================================================================
+   2. КОНСТАНТЫ
+   ========================================================================= */
+const WIN_SCORE    = 50;      // очков до победы
+const STUN_TIME    = 0.7;     // сек. ошеломления
+const CHOP_TIME    = 0.10;    // сек. анимации удара (2–3 кадра)
+const TRUNK_TWEEN  = 0.08;    // сек. плавного опускания ствола
+const SHAKE_TIME   = 0.12;    // сек. тряски зоны от удара
+const SHAKE_MAG    = 3.5;     // px тряски от удара
+const STUN_SHAKE_T = 0.30;    // сек. тряски от ошеломления
+const STUN_SHAKE   = 8.0;     // px тряски от ошеломления
+const BRANCH_CHANCE= 0.35;    // вероятность ветки на новом сегменте
+const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
+const SAFE_START   = 3;       // первые сегменты — всегда без веток
+const MIN_TRUNK    = 14;      // минимум сегментов в памяти (дополняется под экран)
+const CD_STEPS     = 3;       // «3 · 2 · 1» перед боем
+const CD_STEP_TIME = 0.55;    // сек. на цифру
+const GO_TIME      = 0.45;    // сек. надписи «РУБИ!»
+const STEP         = 1 / 120; // фиксированный шаг логики
+
+const NONE = 'NONE', LEFT = 'LEFT', RIGHT = 'RIGHT';
+
+// Уровни сложности бота: интервал удара сжимается по мере набора очков.
+const DIFFICULTY = [
+  { id:'easy',   name:'Спокойно', start:0.78, min:0.42, err:0.20 },
+  { id:'normal', name:'Ровно',    start:0.55, min:0.26, err:0.12 },
+  { id:'hard',   name:'Жёстко',   start:0.42, min:0.19, err:0.06 }
+];
+
+
+/* =========================================================================
+   3. СОСТОЯНИЕ
+   ========================================================================= */
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d', { alpha:false });
+
+let W = 0, H = 0, DPR = 1;          // размеры в CSS-пикселях
+let L = {};                          // вычисленная разметка (см. computeLayout)
+
+let scene   = 'menu';                // 'menu' | 'difficulty' | 'play' | 'over'
+let mode    = 'bot';                 // 'bot' | 'duo'
+let diff    = DIFFICULTY[1];
+let winner  = null;
+let clock   = 0;                     // общее время, для колебаний
+let countdown = 0;                   // отсчёт перед стартом
+let goFlash = 0;                     // таймер надписи «РУБИ!»
+let buttons = [];                    // активные кнопки текущей сцены
+
+function makePlayer(index, isBot) {
+  return {
+    index, isBot,
+    name: isBot ? 'Бот' : (index === 0 ? 'Игрок 1' : 'Игрок 2'),
+    segments: [],        // [0] — нижний сегмент, { branch: NONE|LEFT|RIGHT }
+    score: 0,
+    side: LEFT,          // с какой стороны ствола стоит персонаж
+    chop: 0,             // таймер анимации удара
+    stun: 0,             // таймер ошеломления
+    trunkAnim: 0,        // 1 → 0, твин опускания ствола
+    shake: 0, shakeDur: SHAKE_TIME, shakeMag: 0,
+    flash: 0,            // белая вспышка удара
+    red: 0,              // красная вспышка ошеломления
+    scorePop: 0,         // pop-анимация счётчика
+    particles: [],
+    botTimer: 0
+  };
+}
+let players = [makePlayer(0, false), makePlayer(1, true)];
+
+
+/* =========================================================================
+   4. ЗВУК — Web Audio API, все тона генерируются на лету.
+   ========================================================================= */
+const Sound = (function () {
+  let ac = null, master = null, noiseBuf = null, ok = true;
+
+  function ensure() {
+    if (ac || !ok) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { ok = false; return; }
+    ac = new AC();
+    master = ac.createGain();
+    master.gain.value = 0.45;
+    master.connect(ac.destination);
+
+    const len = Math.floor(ac.sampleRate * 0.4);
+    noiseBuf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+
+  function unlock() {
+    ensure();
+    if (ac && ac.state === 'suspended') ac.resume();
+  }
+
+  function tone(freq, dur, type, vol, slideTo, delay) {
+    ensure(); if (!ac) return;
+    const t = ac.currentTime + (delay || 0);
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type || 'square';
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.03);
+  }
+
+  function noise(dur, vol, freq, q) {
+    ensure(); if (!ac) return;
+    const t = ac.currentTime;
+    const s = ac.createBufferSource(); s.buffer = noiseBuf;
+    const f = ac.createBiquadFilter();
+    f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q || 1.2;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(master);
+    s.start(t); s.stop(t + dur + 0.02);
+  }
+
+  return {
+    unlock,
+    chop(pitch) {
+      noise(0.09, 0.32, 1700, 0.9);
+      tone(150 + pitch * 40, 0.085, 'square', 0.16, 70);
+    },
+    stun() {
+      tone(190, 0.34, 'sawtooth', 0.22, 55);
+      noise(0.22, 0.18, 320, 0.7);
+    },
+    tap()  { tone(520, 0.06, 'triangle', 0.14, 720); },
+    tick() { tone(440, 0.09, 'triangle', 0.16); },
+    go()   { tone(880, 0.18, 'triangle', 0.20); },
+    win() {
+      [523, 659, 784, 1046].forEach((f, i) =>
+        tone(f, 0.16, 'triangle', 0.20, null, i * 0.09));
+    }
+  };
+})();
+
+
+/* =========================================================================
+   5. ГЕНЕРАЦИЯ ДЕРЕВА
+   ========================================================================= */
+function nextSegment(segs) {
+  if (Math.random() >= BRANCH_CHANCE) return { branch: NONE };
+
+  let side = Math.random() < 0.5 ? LEFT : RIGHT;
+
+  // Не больше MAX_SAME_RUN веток подряд с одной стороны.
+  let run = 0;
+  for (let i = segs.length - 1; i >= 0 && segs[i].branch === side; i--) run++;
+  if (run >= MAX_SAME_RUN) side = (side === LEFT ? RIGHT : LEFT);
+
+  return { branch: side };
+}
+
+function trunkLength() {
+  return Math.max(MIN_TRUNK, (L.visible || 10) + 2);
+}
+
+function buildTrunk() {
+  const segs = [];
+  const n = trunkLength();
+  for (let i = 0; i < n; i++) {
+    segs.push(i < SAFE_START ? { branch: NONE } : nextSegment(segs));
+  }
+  return segs;
+}
+
+/** После смены ориентации ствол может «не доставать» до верха — дорастим. */
+function ensureTrunk(p) {
+  const n = trunkLength();
+  while (p.segments.length < n) p.segments.push(nextSegment(p.segments));
+}
+
+
+/* =========================================================================
+   6. РАЗМЕТКА И МАСШТАБИРОВАНИЕ ХОЛСТА
+   ========================================================================= */
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 3);
+  W = Math.max(1, window.innerWidth);
+  H = Math.max(1, window.innerHeight);
+  canvas.width  = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  computeLayout();
+}
+
+function computeLayout() {
+  const zoneW  = W / 2;
+  const ground = Math.max(40, Math.min(H * 0.10, 92));
+  const baseY  = H - ground;                       // линия земли
+  const segH   = Math.max(24, Math.min(zoneW * 0.26, (baseY - H * 0.16) / 7));
+  const scoreSize = Math.round(Math.min(zoneW * 0.26, H * 0.10, 72));
+  L = {
+    zoneW,
+    ground,
+    baseY,
+    segH,
+    trunkW: segH * 0.92,
+    branchLen: Math.min(segH * 0.95, zoneW * 0.26),
+    charH: segH * 1.62,
+    scoreSize,
+    nameSize: Math.round(Math.min(zoneW * 0.075, 19)),
+    hudY: scoreSize * 0.62 + 6,
+    visible: Math.ceil(baseY / segH) + 1
+  };
+  if (players) for (const p of players) if (p.segments.length) ensureTrunk(p);
+}
+
+
+/* =========================================================================
+   7. ВВОД — только touchstart/pointerdown, без задержек click
+   ========================================================================= */
+function zoneOf(x) { return x < W / 2 ? 0 : 1; }
+
+function onPoint(x, y) {
+  Sound.unlock();
+
+  if (scene === 'play') {
+    const p = players[zoneOf(x)];
+    if (p.isBot) return;
+    const localX = x - p.index * L.zoneW;
+    chopAttempt(p, localX < L.zoneW / 2 ? LEFT : RIGHT);
+    return;
+  }
+
+  for (const b of buttons) {
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+      Sound.tap();
+      b.action();
+      return;
+    }
+  }
+}
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    const t = e.changedTouches[i];
+    onPoint(t.clientX, t.clientY);
+  }
+}, { passive:false });
+
+canvas.addEventListener('touchmove',  e => e.preventDefault(), { passive:false });
+canvas.addEventListener('touchend',   e => e.preventDefault(), { passive:false });
+
+// Мышь — для проверки на десктопе.
+canvas.addEventListener('mousedown', e => { e.preventDefault(); onPoint(e.clientX, e.clientY); });
+
+// Клавиатура — тоже для десктопа: A/D — левый игрок, ←/→ — правый.
+window.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  Sound.unlock();
+  if (scene !== 'play') {
+    if (e.key === 'Enter' || e.key === ' ') { if (buttons[0]) buttons[0].action(); }
+    return;
+  }
+  const k = e.key.toLowerCase();
+  if (k === 'a') chopAttempt(players[0], LEFT);
+  else if (k === 'd') chopAttempt(players[0], RIGHT);
+  else if (e.key === 'ArrowLeft')  chopAttempt(players[1], LEFT);
+  else if (e.key === 'ArrowRight') chopAttempt(players[1], RIGHT);
+});
+
+// Гасим зум по двойному тапу, жесты и контекстное меню.
+window.addEventListener('contextmenu', e => e.preventDefault());
+window.addEventListener('dblclick',    e => e.preventDefault());
+['gesturestart','gesturechange','gestureend'].forEach(n =>
+  window.addEventListener(n, e => e.preventDefault(), { passive:false }));
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+
+
+/* =========================================================================
+   8. ЛОГИКА
+   ========================================================================= */
+function startGame(newMode) {
+  mode = newMode;
+  players = [makePlayer(0, false), makePlayer(1, newMode === 'bot')];
+  if (newMode === 'duo') players[1].name = 'Игрок 2';
+  for (const p of players) {
+    p.segments = buildTrunk();
+    p.botTimer = diff.start;
+  }
+  winner = null;
+  countdown = CD_STEPS * CD_STEP_TIME;
+  goFlash = 0;
+  scene = 'play';
+}
+
+function chopAttempt(p, side) {
+  if (scene !== 'play' || countdown > 0) return;
+  if (p.stun > 0) return;                     // ошеломлён — тапы игнорируются
+
+  p.side = side;
+  p.chop = CHOP_TIME;
+
+  const bottom = p.segments[0];
+  if (bottom.branch === side) {
+    // Попал по ветке — ошеломление.
+    p.stun = STUN_TIME;
+    p.shake = STUN_SHAKE_T; p.shakeDur = STUN_SHAKE_T; p.shakeMag = STUN_SHAKE;
+    p.red = 1;
+    spawnLeaves(p, side);
+    Sound.stun();
+    return;
+  }
+
+  // Чистый удар: нижний сегмент уходит, ствол опускается, сверху новый.
+  p.segments.shift();
+  p.segments.push(nextSegment(p.segments));
+  p.trunkAnim = 1;
+  p.score++;
+  p.scorePop = 1;
+  p.shake = SHAKE_TIME; p.shakeDur = SHAKE_TIME; p.shakeMag = SHAKE_MAG;
+  p.flash = 1;
+  spawnChips(p, side);
+  Sound.chop(p.score / WIN_SCORE);
+
+  if (p.score >= WIN_SCORE) {
+    winner = p;
+    scene = 'over';
+    Sound.win();
+  }
+}
+
+function spawnChips(p, side) {
+  const dir = side === LEFT ? -1 : 1;          // наружу от ствола, в сторону удара
+  const x = L.zoneW / 2 + dir * L.trunkW * 0.5;
+  const y = L.baseY - L.segH * 0.55;
+  for (let i = 0; i < 12; i++) {
+    p.particles.push({
+      x, y,
+      vx: dir * (60 + Math.random() * 220) + (Math.random() - 0.5) * 80,
+      vy: -(120 + Math.random() * 220),
+      g: 900,
+      life: 0.45 + Math.random() * 0.35,
+      max: 0.8,
+      size: 3 + Math.random() * 4,
+      rot: Math.random() * 6.28,
+      spin: (Math.random() - 0.5) * 18,
+      color: Math.random() < 0.5 ? PALETTE.chip : PALETTE.chipDark
+    });
+  }
+}
+
+function spawnLeaves(p, side) {
+  const dir = side === LEFT ? -1 : 1;
+  const x = L.zoneW / 2 + dir * L.trunkW * 0.6;
+  const y = L.baseY - L.segH * 0.6;
+  for (let i = 0; i < 10; i++) {
+    p.particles.push({
+      x, y,
+      vx: dir * (30 + Math.random() * 140),
+      vy: -(60 + Math.random() * 180),
+      g: 620,
+      life: 0.5 + Math.random() * 0.4,
+      max: 0.9,
+      size: 4 + Math.random() * 5,
+      rot: Math.random() * 6.28,
+      spin: (Math.random() - 0.5) * 12,
+      color: Math.random() < 0.5 ? PALETTE.leaf : PALETTE.leafDark
+    });
+  }
+}
+
+function update(dt) {
+  clock += dt;
+
+  if (goFlash > 0) goFlash = Math.max(0, goFlash - dt);
+
+  if (scene === 'play' && countdown > 0) {
+    const before = Math.ceil(countdown / CD_STEP_TIME);
+    countdown -= dt;
+    if (countdown < 0) countdown = 0;
+    const after = Math.ceil(countdown / CD_STEP_TIME);
+    if (after !== before) {
+      if (after > 0) Sound.tick();
+      else { Sound.go(); goFlash = GO_TIME; }
+    }
+  }
+
+  for (const p of players) {
+    if (p.chop > 0)      p.chop = Math.max(0, p.chop - dt);
+    if (p.stun > 0)      p.stun = Math.max(0, p.stun - dt);
+    if (p.shake > 0)     p.shake = Math.max(0, p.shake - dt);
+    if (p.flash > 0)     p.flash = Math.max(0, p.flash - dt * 7);
+    if (p.red > 0)       p.red = Math.max(0, p.red - dt / STUN_TIME);
+    if (p.scorePop > 0)  p.scorePop = Math.max(0, p.scorePop - dt * 5);
+    if (p.trunkAnim > 0) p.trunkAnim = Math.max(0, p.trunkAnim - dt / TRUNK_TWEEN);
+
+    for (let i = p.particles.length - 1; i >= 0; i--) {
+      const q = p.particles[i];
+      q.life -= dt;
+      if (q.life <= 0) { p.particles.splice(i, 1); continue; }
+      q.vy += q.g * dt;
+      q.x += q.vx * dt;
+      q.y += q.vy * dt;
+      q.rot += q.spin * dt;
+    }
+
+    if (p.isBot && scene === 'play' && countdown === 0) updateBot(p, dt);
+  }
+}
+
+
+/* =========================================================================
+   9. БОТ — интервал сжимается по ходу партии, иногда бьёт по ветке.
+   ========================================================================= */
+function botInterval(p) {
+  const t = Math.min(1, p.score / WIN_SCORE);
+  return diff.start + (diff.min - diff.start) * t;
+}
+
+function updateBot(p, dt) {
+  if (p.stun > 0) { p.botTimer = botInterval(p) * 0.6; return; }
+
+  p.botTimer -= dt;
+  if (p.botTimer > 0) return;
+  p.botTimer = botInterval(p) * (0.85 + Math.random() * 0.3);
+
+  const branch = p.segments[0].branch;
+  const safe = branch === LEFT ? RIGHT : (branch === RIGHT ? LEFT
+              : (Math.random() < 0.5 ? LEFT : RIGHT));
+
+  // Ошибка возможна только когда ветка есть — бот бьёт прямо в неё.
+  if (branch !== NONE && Math.random() < diff.err) chopAttempt(p, branch);
+  else chopAttempt(p, safe);
+}
+
+
+/* =========================================================================
+   10. ОТРИСОВКА — примитивы; заменяются на арт без правок логики.
+   ========================================================================= */
+function roundRect(x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x,     y + h, rr);
+  ctx.arcTo(x,     y + h, x,     y,     rr);
+  ctx.arcTo(x,     y,     x + w, y,     rr);
+  ctx.closePath();
+}
+
+function drawBackground() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, PALETTE.skyTop);
+  g.addColorStop(1, PALETTE.skyBottom);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawGround(zoneW) {
+  ctx.fillStyle = PALETTE.groundDark;
+  ctx.fillRect(0, L.baseY, zoneW, H - L.baseY);
+  ctx.fillStyle = PALETTE.ground;
+  ctx.fillRect(0, L.baseY, zoneW, Math.min(18, L.ground * 0.25));
+  ctx.fillStyle = PALETTE.groundLine;
+  ctx.fillRect(0, L.baseY, zoneW, 3);
+}
+
+/** Один сегмент ствола. Точка (cx, cy) — его центр. */
+function drawTrunkSegment(cx, cy, w, h, index) {
+  ctx.fillStyle = PALETTE.trunk;
+  ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+
+  ctx.fillStyle = PALETTE.trunkLight;
+  ctx.fillRect(cx - w / 2, cy - h / 2, w * 0.22, h);
+  ctx.fillStyle = PALETTE.trunkDark;
+  ctx.fillRect(cx + w / 2 - w * 0.18, cy - h / 2, w * 0.18, h);
+
+  // Кольцо-стык между сегментами.
+  ctx.fillStyle = PALETTE.trunkRing;
+  ctx.fillRect(cx - w / 2, cy + h / 2 - 2, w, 2);
+
+  // Пара «сучков» для читаемости шага.
+  if (index % 2 === 0) {
+    ctx.fillStyle = PALETTE.trunkDark;
+    ctx.beginPath();
+    ctx.ellipse(cx + w * 0.08, cy, w * 0.10, h * 0.14, 0, 0, 6.2832);
+    ctx.fill();
+  }
+}
+
+/** Ветка на сегменте. side — LEFT|RIGHT. */
+function drawBranch(cx, cy, side, w, h) {
+  const dir = side === LEFT ? -1 : 1;
+  const len = L.branchLen;
+  const th  = h * 0.34;
+  const x0  = cx + dir * (w / 2 - 2);
+
+  ctx.fillStyle = PALETTE.branch;
+  ctx.fillRect(Math.min(x0, x0 + dir * len), cy - th / 2, len, th);
+  ctx.fillStyle = PALETTE.branchDark;
+  ctx.fillRect(Math.min(x0, x0 + dir * len), cy + th / 2 - 3, len, 3);
+
+  // Листва пучком на конце.
+  const lx = x0 + dir * len, ly = cy;
+  ctx.fillStyle = PALETTE.leaf;
+  ctx.beginPath();
+  ctx.arc(lx, ly - th * 0.2, th * 0.95, 0, 6.2832);
+  ctx.arc(lx - dir * th * 0.8, ly + th * 0.2, th * 0.75, 0, 6.2832);
+  ctx.fill();
+  ctx.fillStyle = PALETTE.leafDark;
+  ctx.beginPath();
+  ctx.arc(lx + dir * th * 0.35, ly + th * 0.45, th * 0.55, 0, 6.2832);
+  ctx.fill();
+}
+
+/**
+ * Лесоруб. (x, baseY) — точка опоры, side — с какой стороны ствола стоит,
+ * chopT — остаток анимации удара, stunT — остаток ошеломления.
+ */
+function drawLumberjack(x, baseY, side, chopT, stunT) {
+  const h    = L.charH;
+  const dir  = side === LEFT ? 1 : -1;     // куда смотрит (к стволу)
+  const prog = chopT > 0 ? 1 - chopT / CHOP_TIME : 1;   // 0 — замах, 1 — удар
+  const swing = chopT > 0
+    ? (prog < 0.35 ? -0.9 * (prog / 0.35)                     // замах назад
+                   : -0.9 + 3.1 * Math.pow((prog - 0.35) / 0.65, 0.6)) // удар
+    : 0.35;                                                    // покой
+  const wob = stunT > 0 ? Math.sin(clock * 38) * 0.16 : 0;
+
+  ctx.save();
+  ctx.translate(x, baseY);
+  ctx.scale(dir, 1);
+  ctx.rotate(wob);
+
+  const bodyW = h * 0.34;
+
+  // Ноги
+  ctx.fillStyle = PALETTE.pants;
+  ctx.fillRect(-bodyW * 0.45, -h * 0.34, bodyW * 0.38, h * 0.34);
+  ctx.fillRect( bodyW * 0.07, -h * 0.34, bodyW * 0.38, h * 0.34);
+  ctx.fillStyle = PALETTE.boots;
+  ctx.fillRect(-bodyW * 0.5, -h * 0.06, bodyW * 0.48, h * 0.06);
+  ctx.fillRect( bodyW * 0.04, -h * 0.06, bodyW * 0.48, h * 0.06);
+
+  // Корпус, чуть подаётся вперёд на ударе
+  const lean = chopT > 0 ? 0.12 * Math.sin(prog * Math.PI) : 0;
+  ctx.save();
+  ctx.translate(0, -h * 0.34);
+  ctx.rotate(lean);
+  ctx.fillStyle = PALETTE.shirt;
+  roundRect(-bodyW / 2, -h * 0.32, bodyW, h * 0.34, bodyW * 0.2);
+  ctx.fill();
+  ctx.fillStyle = PALETTE.shirtDark;
+  ctx.fillRect(-bodyW * 0.08, -h * 0.32, bodyW * 0.16, h * 0.34);
+
+  // Голова
+  ctx.fillStyle = PALETTE.skin;
+  ctx.beginPath();
+  ctx.arc(bodyW * 0.06, -h * 0.42, h * 0.115, 0, 6.2832);
+  ctx.fill();
+  ctx.fillStyle = PALETTE.hair;
+  ctx.beginPath();
+  ctx.arc(bodyW * 0.02, -h * 0.46, h * 0.105, Math.PI, 0);
+  ctx.fill();
+  // Глаз
+  ctx.fillStyle = '#20242a';
+  if (stunT > 0) {
+    ctx.fillRect(bodyW * 0.12, -h * 0.435, h * 0.035, h * 0.012);
+  } else {
+    ctx.beginPath();
+    ctx.arc(bodyW * 0.14, -h * 0.43, h * 0.016, 0, 6.2832);
+    ctx.fill();
+  }
+
+  // Рука с топором
+  ctx.save();
+  ctx.translate(bodyW * 0.16, -h * 0.22);
+  ctx.rotate(swing);
+  ctx.fillStyle = PALETTE.skin;
+  ctx.fillRect(0, -h * 0.035, h * 0.10, h * 0.07);
+  ctx.fillStyle = PALETTE.axeHandle;
+  ctx.fillRect(h * 0.06, -h * 0.028, h * 0.34, h * 0.056);
+  ctx.fillStyle = PALETTE.axeBlade;
+  ctx.beginPath();
+  ctx.moveTo(h * 0.36, -h * 0.13);
+  ctx.lineTo(h * 0.50, -h * 0.05);
+  ctx.lineTo(h * 0.50,  h * 0.05);
+  ctx.lineTo(h * 0.36,  h * 0.13);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = PALETTE.axeBladeDark;
+  ctx.fillRect(h * 0.34, -h * 0.09, h * 0.035, h * 0.18);
+  ctx.restore();
+
+  ctx.restore(); // корпус
+  ctx.restore(); // персонаж
+
+  // Значок ошеломления — крутящиеся звёздочки над головой.
+  if (stunT > 0) {
+    const cx = x, cy = baseY - h * 1.05;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, stunT / 0.15);
+    for (let i = 0; i < 3; i++) {
+      const a = clock * 7 + i * 2.094;
+      ctx.fillStyle = PALETTE.accent;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * h * 0.22, cy + Math.sin(a) * h * 0.07, h * 0.035, 0, 6.2832);
+      ctx.fill();
+    }
+    ctx.fillStyle = PALETTE.danger;
+    ctx.font = 'bold ' + Math.round(h * 0.28) + 'px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('!', cx, cy - h * 0.02);
+    ctx.restore();
+  }
+}
+
+function drawParticles(p) {
+  for (const q of p.particles) {
+    const a = Math.min(1, q.life / (q.max * 0.5));
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(q.x, q.y);
+    ctx.rotate(q.rot);
+    ctx.fillStyle = q.color;
+    ctx.fillRect(-q.size / 2, -q.size / 2, q.size, q.size * 0.7);
+    ctx.restore();
+  }
+}
+
+function drawScore(p) {
+  const cx = L.zoneW / 2;
+
+  // Затемнение под HUD, чтобы цифры читались поверх ствола.
+  const hudH = L.hudY + L.scoreSize + L.nameSize + 46;
+  const hg = ctx.createLinearGradient(0, 0, 0, hudH);
+  hg.addColorStop(0, 'rgba(8,12,18,0.78)');
+  hg.addColorStop(0.7, 'rgba(8,12,18,0.45)');
+  hg.addColorStop(1, 'rgba(8,12,18,0)');
+  ctx.fillStyle = hg;
+  ctx.fillRect(0, 0, L.zoneW, hudH);
+
+  const pop = 1 + p.scorePop * 0.45;
+  ctx.save();
+  ctx.translate(cx, L.hudY);
+  ctx.scale(pop, pop);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = p.scorePop > 0.5 ? PALETTE.accent : PALETTE.text;
+  ctx.font = 'bold ' + L.scoreSize + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(String(p.score), 0, 0);
+  ctx.restore();
+
+  const nameY = L.hudY + L.scoreSize * 0.58;
+  ctx.fillStyle = PALETTE.textDim;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.font = '600 ' + L.nameSize + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(p.name, cx, nameY);
+
+  // Полоска прогресса до WIN_SCORE
+  const bw = L.zoneW * 0.5, bh = 6;
+  const bx = cx - bw / 2, by = nameY + L.nameSize + 10;
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  roundRect(bx, by, bw, bh, 3); ctx.fill();
+  ctx.fillStyle = PALETTE.accent;
+  roundRect(bx, by, bw * Math.min(1, p.score / WIN_SCORE), bh, 3); ctx.fill();
+}
+
+/** Полная отрисовка одной зоны в локальных координатах (0..zoneW, 0..H). */
+function drawZone(p) {
+  const zx = p.index * L.zoneW;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(zx, 0, L.zoneW, H);
+  ctx.clip();
+  ctx.translate(zx, 0);
+
+  // Фон зоны
+  ctx.fillStyle = p.index === 0 ? PALETTE.zoneA : PALETTE.zoneB;
+  ctx.fillRect(0, 0, L.zoneW, H);
+
+  // Тряска зоны
+  const sh = p.shake > 0 ? p.shake / p.shakeDur : 0;
+  ctx.save();
+  if (sh > 0) {
+    ctx.translate((Math.random() - 0.5) * 2 * p.shakeMag * sh,
+                  (Math.random() - 0.5) * 2 * p.shakeMag * sh);
+  }
+
+  drawGround(L.zoneW);
+
+  // Ствол: снизу вверх, со смещением твина (1 → 0 = сегмент проезжает вниз).
+  const cx = L.zoneW / 2;
+  const slide = easeOut(p.trunkAnim) * L.segH;
+  const count = Math.min(p.segments.length, L.visible + 1);
+  for (let i = count - 1; i >= 0; i--) {
+    const cy = L.baseY - L.segH / 2 - i * L.segH - slide;
+    if (cy - L.segH > H) continue;
+    drawTrunkSegment(cx, cy, L.trunkW, L.segH, i);
+    if (p.segments[i].branch !== NONE) {
+      drawBranch(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
+    }
+  }
+
+  // Пень под стволом
+  ctx.fillStyle = PALETTE.trunkDark;
+  ctx.fillRect(cx - L.trunkW * 0.62, L.baseY, L.trunkW * 1.24, Math.min(14, L.ground * 0.2));
+
+  // Персонаж
+  const charX = cx + (p.side === LEFT ? -1 : 1) * (L.trunkW * 0.5 + L.charH * 0.26);
+  drawLumberjack(charX, L.baseY, p.side, p.chop, p.stun);
+
+  drawParticles(p);
+  ctx.restore(); // тряска
+
+  // Вспышка удара
+  if (p.flash > 0) {
+    ctx.globalAlpha = p.flash * 0.16;
+    ctx.fillStyle = PALETTE.flash;
+    ctx.fillRect(0, 0, L.zoneW, H);
+    ctx.globalAlpha = 1;
+  }
+  // Красная вспышка ошеломления
+  if (p.red > 0) {
+    ctx.globalAlpha = p.red * 0.34;
+    ctx.fillStyle = PALETTE.stunTint;
+    ctx.fillRect(0, 0, L.zoneW, H);
+    ctx.globalAlpha = 1;
+    ctx.globalAlpha = Math.min(1, p.red * 1.4);
+    ctx.strokeStyle = PALETTE.danger;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, L.zoneW - 6, H - 6);
+    ctx.globalAlpha = 1;
+  }
+
+  drawScore(p);
+  ctx.restore(); // клип зоны
+}
+
+function easeOut(t) { return t * t; }   // твин ствола: быстрый старт, мягкий стоп
+
+function drawDivider() {
+  ctx.fillStyle = PALETTE.divider;
+  ctx.fillRect(W / 2 - 2, 0, 4, H);
+}
+
+function drawCountdown() {
+  let label, frac, base;
+  if (countdown > 0) {
+    const t = countdown / CD_STEP_TIME;
+    label = String(Math.ceil(t));
+    frac  = t - Math.floor(t);           // 1 → 0 внутри одной цифры
+    base  = Math.min(W, H) * 0.22;
+  } else if (goFlash > 0) {
+    label = 'РУБИ!';
+    frac  = goFlash / GO_TIME;
+    base  = Math.min(W, H) * 0.15;
+  } else {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = 0.25 + frac * 0.7;
+  ctx.fillStyle = PALETTE.accent;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold ' + Math.round(base * (1 + (1 - frac) * 0.3)) + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(label, W / 2, H * 0.45);
+  ctx.restore();
+}
+
+
+/* ---------- Экраны меню ---------- */
+function button(x, y, w, h, label, sub, action, hi) {
+  buttons.push({ x, y, w, h, action });
+  ctx.fillStyle = hi ? PALETTE.btnHi : PALETTE.btn;
+  roundRect(x, y, w, h, 14); ctx.fill();
+  ctx.strokeStyle = PALETTE.btnBorder; ctx.lineWidth = 2;
+  roundRect(x, y, w, h, 14); ctx.stroke();
+
+  ctx.fillStyle = PALETTE.text;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = sub ? 'alphabetic' : 'middle';
+  ctx.font = 'bold ' + Math.round(Math.min(w * 0.105, 25)) + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(label, x + w / 2, sub ? y + h * 0.46 : y + h / 2);
+  if (sub) {
+    ctx.fillStyle = PALETTE.textDim;
+    ctx.textBaseline = 'top';
+    ctx.font = '500 ' + Math.round(Math.min(w * 0.062, 14)) + 'px system-ui, -apple-system, sans-serif';
+    ctx.fillText(sub, x + w / 2, y + h * 0.58);
+  }
+}
+
+function drawTitle(title, subtitle) {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = PALETTE.text;
+  ctx.font = 'bold ' + Math.round(Math.min(W * 0.13, H * 0.09, 64)) + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(title, W / 2, H * 0.20);
+  if (subtitle) {
+    ctx.fillStyle = PALETTE.textDim;
+    ctx.font = '500 ' + Math.round(Math.min(W * 0.045, 20)) + 'px system-ui, -apple-system, sans-serif';
+    ctx.fillText(subtitle, W / 2, H * 0.20 + Math.min(W * 0.10, 52));
+  }
+}
+
+function drawMenu() {
+  drawBackground();
+  buttons = [];
+  drawTitle('ЛЕСОРУБЫ', 'дуэль до ' + WIN_SCORE + ' очков');
+
+  const bw = Math.min(W * 0.72, 420), bh = Math.min(H * 0.11, 84);
+  const x = (W - bw) / 2;
+  let y = H * 0.42;
+  button(x, y, bw, bh, 'Против бота', 'сложность: ' + diff.name,
+         () => { scene = 'difficulty'; }, true);
+  y += bh + 18;
+  button(x, y, bw, bh, 'На двоих', 'один экран, два игрока',
+         () => startGame('duo'), false);
+
+  ctx.fillStyle = PALETTE.textDim;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '500 ' + Math.round(Math.min(W * 0.036, 15)) + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText('Тапай по левой или правой половине своей зоны', W / 2, H * 0.88);
+  ctx.fillText('Ветка с той же стороны — ошеломление', W / 2, H * 0.88 + 22);
+}
+
+function drawDifficulty() {
+  drawBackground();
+  buttons = [];
+  drawTitle('Сложность', 'темп бота и его ошибки');
+
+  const bw = Math.min(W * 0.72, 420), bh = Math.min(H * 0.095, 72);
+  const x = (W - bw) / 2;
+  let y = H * 0.36;
+  for (const d of DIFFICULTY) {
+    button(x, y, bw, bh, d.name,
+           'удар ' + Math.round(d.start * 1000) + '→' + Math.round(d.min * 1000) + ' мс · ошибка ' + Math.round(d.err * 100) + '%',
+           () => { diff = d; startGame('bot'); }, d.id === diff.id);
+    y += bh + 14;
+  }
+  button(x, y + 10, bw, bh * 0.8, 'Назад', null, () => { scene = 'menu'; }, false);
+}
+
+function drawGameOver() {
+  // Позади — застывшее поле боя.
+  drawBackground();
+  for (const p of players) drawZone(p);
+  drawDivider();
+
+  ctx.fillStyle = 'rgba(10,15,21,0.78)';
+  ctx.fillRect(0, 0, W, H);
+
+  buttons = [];
+  const pulse = 1 + Math.sin(clock * 4) * 0.03;
+  ctx.save();
+  ctx.translate(W / 2, H * 0.28);
+  ctx.scale(pulse, pulse);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = PALETTE.accent;
+  ctx.font = 'bold ' + Math.round(Math.min(W * 0.12, H * 0.085, 58)) + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText('ПОБЕДА', 0, 0);
+  ctx.restore();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = PALETTE.text;
+  ctx.font = 'bold ' + Math.round(Math.min(W * 0.075, 32)) + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(winner ? winner.name : '', W / 2, H * 0.28 + Math.min(W * 0.12, 60));
+
+  ctx.fillStyle = PALETTE.textDim;
+  ctx.font = '500 ' + Math.round(Math.min(W * 0.045, 19)) + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(players[0].score + ' : ' + players[1].score, W / 2, H * 0.28 + Math.min(W * 0.12, 60) + 36);
+
+  const bw = Math.min(W * 0.66, 380), bh = Math.min(H * 0.10, 76);
+  const x = (W - bw) / 2;
+  let y = H * 0.58;
+  button(x, y, bw, bh, 'Ещё раз', null, () => startGame(mode), true);
+  y += bh + 16;
+  button(x, y, bw, bh * 0.82, 'В меню', null, () => { scene = 'menu'; }, false);
+}
+
+function render() {
+  if (scene === 'menu')            { drawMenu(); return; }
+  if (scene === 'difficulty')      { drawDifficulty(); return; }
+  if (scene === 'over')            { drawGameOver(); return; }
+
+  drawBackground();
+  for (const p of players) drawZone(p);
+  drawDivider();
+  drawCountdown();
+}
+
+
+/* =========================================================================
+   11. ИГРОВОЙ ЦИКЛ — rAF + фиксированный шаг логики
+   ========================================================================= */
+let last = 0, acc = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!last) last = now;
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.25) dt = 0.25;          // вернулись из фона — не прокручиваем логику
+
+  acc += dt;
+  let guard = 0;
+  while (acc >= STEP && guard++ < 8) { update(STEP); acc -= STEP; }
+
+  render();
+}
+
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
