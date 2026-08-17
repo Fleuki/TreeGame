@@ -53,8 +53,14 @@ python3 -m http.server 8000
 # затем открыть http://localhost:8000
 ```
 
-Проект публикуется как есть через **GitHub Pages**:
-Settings → Pages → Deploy from branch → ветка → `/ (root)`.
+## Публикация
+
+Игра выкладывается на **GitHub Pages** через GitHub Actions: workflow
+`.github/workflows/pages.yml` на каждый пуш в `main` публикует корень
+репозитория как есть. Сборки нет, настраивать источник в Settings не нужно —
+workflow включает Pages сам (`configure-pages` с `enablement: true`).
+
+Перевыложить вручную: вкладка Actions → *Deploy to GitHub Pages* → Run workflow.
 
 ## Устройство файла
 
