@@ -89,6 +89,9 @@ const SHAKE_TIME   = 0.12;    // сек. тряски зоны от удара
 const SHAKE_MAG    = 3.5;     // px тряски от удара
 const STUN_SHAKE_T = 0.30;    // сек. тряски от ошеломления
 const STUN_SHAKE   = 8.0;     // px тряски от ошеломления
+const RED_TIME     = 0.25;    // сек. красной заливки зоны на промахе
+const KNOCK_TIME   = 0.35;    // сек. отлёта персонажа назад и возврата
+const TAP_FLASH    = 0.10;    // сек. подсветки половины зоны под пальцем
 const BRANCH_CHANCE= 0.35;    // вероятность ветки на новом сегменте
 const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
 const SAFE_START   = 3;       // первые сегменты — всегда без веток
@@ -138,7 +141,10 @@ function makePlayer(index, isBot) {
     trunkAnim: 0,        // 1 → 0, твин опускания ствола
     shake: 0, shakeDur: SHAKE_TIME, shakeMag: 0,
     flash: 0,            // белая вспышка удара
-    red: 0,              // красная вспышка ошеломления
+    red: 0,              // красная заливка зоны на промахе
+    knock: 0,            // отлёт персонажа назад на промахе
+    tapFlash: 0,         // подсветка половины зоны под пальцем
+    tapSide: LEFT,       // какую половину подсветить
     scorePop: 0,         // pop-анимация счётчика
     particles: [],
     botTimer: 0
@@ -207,8 +213,10 @@ const Sound = (function () {
       tone(150 + pitch * 40, 0.085, 'square', 0.16, 70);
     },
     stun() {
-      tone(190, 0.34, 'sawtooth', 0.22, 55);
-      noise(0.22, 0.18, 320, 0.7);
+      // Промах должен звучать как удар: низкий тон плюс глухой «бум».
+      tone(130, 0.38, 'sawtooth', 0.30, 38);
+      tone( 70, 0.26, 'sine',     0.34, 34);
+      noise(0.20, 0.22, 200, 0.6);
     },
     tap()  { tone(520, 0.06, 'triangle', 0.14, 720); },
     tick() { tone(440, 0.09, 'triangle', 0.16); },
@@ -287,7 +295,8 @@ function computeLayout() {
   const ground = Math.max(28, Math.min(zh * 0.13, 84));
   const baseY  = zh - ground;                      // линия земли внутри зоны
   const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 6));
-  const scoreSize = Math.round(Math.min(zw * 0.22, zh * 0.13, 68));
+  // Панель счёта компактная — она вспомогательная, поле важнее.
+  const scoreSize = Math.round(Math.min(zw * 0.22, zh * 0.13, 68) / 1.5);
 
   // Толщина чёрной обводки — 4–6 px, чуть тянется за размером сегмента.
   const line = Math.max(4, Math.min(segH * 0.11, 6));
@@ -319,10 +328,10 @@ function computeLayout() {
     trunkW,
     branchLen,
     leafR,
-    // Персонаж крупный: обводка в 4–6 px съедает мелкую фигуру.
-    charH: segH * 2.15,
+    // Персонаж крупный: он главный на экране и должен быть заметнее веток.
+    charH: segH * 2.9,
     scoreSize,
-    nameSize: Math.round(Math.min(zw * 0.07, 19)),
+    nameSize: Math.max(11, Math.round(scoreSize * 0.38)),
     visible: Math.ceil(baseY / segH) + 1
   };
   if (players) for (const p of players) if (p.segments.length) ensureTrunk(p);
@@ -448,6 +457,11 @@ function startGame(newMode) {
 
 function chopAttempt(p, side) {
   if (scene !== 'play' || countdown > 0) return;
+
+  // Подсветка половины зоны — отклик на само касание, до всех проверок,
+  // чтобы игрок видел выбранную сторону даже когда тап пропал впустую.
+  if (!p.isBot) { p.tapFlash = TAP_FLASH; p.tapSide = side; }
+
   if (p.stun > 0) return;                     // ошеломлён — тапы игнорируются
 
   p.side = side;
@@ -455,10 +469,11 @@ function chopAttempt(p, side) {
 
   const bottom = p.segments[0];
   if (bottom.branch === side) {
-    // Попал по ветке — ошеломление.
+    // Попал по ветке — промах: зона краснеет, персонажа отбрасывает.
     p.stun = STUN_TIME;
     p.shake = STUN_SHAKE_T; p.shakeDur = STUN_SHAKE_T; p.shakeMag = STUN_SHAKE;
     p.red = 1;
+    p.knock = KNOCK_TIME;
     spawnLeaves(p, side);
     Sound.stun();
     return;
@@ -543,7 +558,9 @@ function update(dt) {
     if (p.stun > 0)      p.stun = Math.max(0, p.stun - dt);
     if (p.shake > 0)     p.shake = Math.max(0, p.shake - dt);
     if (p.flash > 0)     p.flash = Math.max(0, p.flash - dt * 7);
-    if (p.red > 0)       p.red = Math.max(0, p.red - dt / STUN_TIME);
+    if (p.red > 0)       p.red = Math.max(0, p.red - dt / RED_TIME);
+    if (p.knock > 0)     p.knock = Math.max(0, p.knock - dt);
+    if (p.tapFlash > 0)  p.tapFlash = Math.max(0, p.tapFlash - dt);
     if (p.scorePop > 0)  p.scorePop = Math.max(0, p.scorePop - dt * 5);
     if (p.trunkAnim > 0) p.trunkAnim = Math.max(0, p.trunkAnim - dt / TRUNK_TWEEN);
 
@@ -640,6 +657,37 @@ function drawBackground() {
   g.addColorStop(1, PALETTE.zoneSkyLow);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
+}
+
+// Облака: доля ширины зоны по x, доля высоты неба по y, радиус и скорость.
+const CLOUDS = [
+  { x: 0.16, y: 0.14, r: 0.085, sp: 0.009 },
+  { x: 0.70, y: 0.30, r: 0.062, sp: 0.014 },
+  { x: 0.38, y: 0.52, r: 0.098, sp: 0.006 },
+  { x: 0.88, y: 0.68, r: 0.052, sp: 0.017 }
+];
+
+/** Медленно плывущие облака в небе зоны, позади дерева. */
+function drawClouds(p) {
+  const phase = p.index * 0.37;                  // зоны не зеркалят друг друга
+  const lw = L.line * 0.8;
+  for (const c of CLOUDS) {
+    // Проезжают всю зону и с запасом уходят за края, без «выскакивания».
+    const fx = (c.x + phase + clock * c.sp) % 1.4;
+    const x = (fx - 0.2) * L.zw;
+    const y = c.y * L.baseY;
+    const r = c.r * L.zw;
+    const puffs = [
+      [0, 0, r],
+      [-r * 0.78,  r * 0.16, r * 0.66],
+      [ r * 0.74,  r * 0.20, r * 0.58],
+      [-r * 0.08, -r * 0.44, r * 0.62]
+    ];
+    ctx.fillStyle = PALETTE.outline;
+    for (const q of puffs) { circlePath(x + q[0], y + q[1], q[2] + lw); ctx.fill(); }
+    ctx.fillStyle = PALETTE.white;
+    for (const q of puffs) { circlePath(x + q[0], y + q[1], q[2]); ctx.fill(); }
+  }
 }
 
 function drawGround() {
@@ -812,23 +860,32 @@ function drawParticles(p) {
  * Счёт живёт у края зоны, а не по центру ствола: имя мелко, счёт крупно,
  * под ними полоска прогресса до WIN_SCORE. Игровое поле остаётся чистым.
  */
+/**
+ * Счёт прижат к внешнему краю зоны — к низу локальных координат. У нижнего
+ * игрока это низ экрана, у верхнего (зона развёрнута) — верх. Поле в середине
+ * экрана остаётся свободным.
+ */
 function drawScore(p) {
   const m  = Math.max(12, L.zw * 0.045);
   const sz = L.scoreSize;
+
+  ctx.font = 'bold ' + sz + 'px system-ui, -apple-system, sans-serif';
+  const tw = ctx.measureText(String(p.score)).width;
+  const pw = Math.max(sz * 1.5, tw + sz * 0.7);
+  const ph = sz * 1.18;
+  const bh = Math.max(7, L.line * 1.4);
+
+  const blockH = L.nameSize * 1.3 + ph + bh * 1.1 + bh;
+  const y0 = L.zh - m - blockH;
 
   // Имя — мелко, над плашкой.
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.fillStyle = PALETTE.text;
   ctx.font = '700 ' + L.nameSize + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(p.name, m + L.line, m);
+  ctx.fillText(p.name, m + L.line, y0);
 
   // Счёт — крупно на белой плашке: читается и поверх листвы.
-  ctx.font = 'bold ' + sz + 'px system-ui, -apple-system, sans-serif';
-  const tw = ctx.measureText(String(p.score)).width;
-  const pw = Math.max(sz * 1.5, tw + sz * 0.7);
-  const ph = sz * 1.18;
-  const py = m + L.nameSize * 1.35;
-
+  const py = y0 + L.nameSize * 1.3;
   const pop = 1 + p.scorePop * 0.22;
   ctx.save();
   ctx.translate(m, py);
@@ -842,14 +899,13 @@ function drawScore(p) {
   ctx.restore();
 
   // Полоска прогресса до WIN_SCORE
-  const bh = Math.max(9, L.line * 1.8);
   const by = py + ph + bh * 1.1;
   roundRect(m, by, pw, bh, bh / 2);
-  fillStroke(PALETTE.white, Math.max(3, L.line * 0.6));
+  fillStroke(PALETTE.white, Math.max(3, L.line * 0.55));
   const done = pw * Math.min(1, p.score / WIN_SCORE);
   if (done > bh) {
     roundRect(m, by, done, bh, bh / 2);
-    fillStroke(PALETTE.accent, Math.max(3, L.line * 0.6));
+    fillStroke(PALETTE.accent, Math.max(3, L.line * 0.55));
   }
 }
 
@@ -862,6 +918,7 @@ function drawZone(p) {
     sky.addColorStop(1, PALETTE.zoneSkyLow);
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, L.zw, L.zh);
+    drawClouds(p);
 
     // Тряска зоны
     const sh = p.shake > 0 ? p.shake / p.shakeDur : 0;
@@ -881,20 +938,41 @@ function drawZone(p) {
     const topY = L.baseY - count * L.segH - slide;
     drawTrunk(cx, topY, L.baseY, L.trunkW);
 
-    // Ветки поверх ствола, каждая на своём сегменте.
-    for (let i = count - 1; i >= 0; i--) {
+    // Ветки поверх ствола, каждая на своём сегменте. Нижнюю оставляем
+    // напоследок: крупный персонаж иначе закрывает именно ту ветку,
+    // по которой игрок решает, куда бить.
+    for (let i = count - 1; i >= 1; i--) {
       if (p.segments[i].branch === NONE) continue;
       const cy = L.baseY - L.segH / 2 - i * L.segH - slide;
       if (cy - L.segH > L.zh) continue;
       drawBranch(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
     }
 
-    // Персонаж вплотную к стволу
-    const charX = cx + (p.side === LEFT ? -1 : 1) * (L.trunkW * 0.5 + L.charH * 0.19);
+    // Персонаж вплотную к стволу; на промахе его отбрасывает от ствола
+    // и он возвращается обратно.
+    const away = p.side === LEFT ? -1 : 1;
+    const knock = p.knock > 0
+      ? Math.pow(p.knock / KNOCK_TIME, 0.7) * L.charH * 0.30
+      : 0;
+    const charX = cx + away * (L.trunkW * 0.5 + L.charH * 0.16 + knock);
     drawLumberjack(charX, L.baseY, p.side, p.chop, p.stun);
+
+    // Решающая нижняя ветка — поверх всего.
+    if (p.segments[0].branch !== NONE) {
+      drawBranch(cx, L.baseY - L.segH / 2 - slide,
+                 p.segments[0].branch, L.trunkW, L.segH);
+    }
 
     drawParticles(p);
     ctx.restore(); // тряска
+
+    // Подсветка половины зоны под пальцем — видно, какую сторону выбрал
+    if (p.tapFlash > 0) {
+      ctx.globalAlpha = (p.tapFlash / TAP_FLASH) * 0.28;
+      ctx.fillStyle = PALETTE.white;
+      ctx.fillRect(p.tapSide === LEFT ? 0 : L.zw / 2, 0, L.zw / 2, L.zh);
+      ctx.globalAlpha = 1;
+    }
 
     // Вспышка удара
     if (p.flash > 0) {
@@ -903,14 +981,14 @@ function drawZone(p) {
       ctx.fillRect(0, 0, L.zw, L.zh);
       ctx.globalAlpha = 1;
     }
-    // Красная вспышка ошеломления
+    // Промах: вся зона краснеет коротко и резко
     if (p.red > 0) {
-      ctx.globalAlpha = p.red * 0.22;
+      ctx.globalAlpha = p.red * 0.5;
       ctx.fillStyle = PALETTE.stunTint;
       ctx.fillRect(0, 0, L.zw, L.zh);
-      ctx.globalAlpha = Math.min(1, p.red * 1.4);
+      ctx.globalAlpha = Math.min(1, p.red * 1.6);
       ctx.strokeStyle = PALETTE.danger;
-      ctx.lineWidth = L.line * 1.6;
+      ctx.lineWidth = L.line * 2.2;
       ctx.strokeRect(L.line, L.line, L.zw - L.line * 2, L.zh - L.line * 2);
       ctx.globalAlpha = 1;
     }
