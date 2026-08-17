@@ -37,9 +37,10 @@
 const PALETTE = {
   skyTop:      '#243447',
   skyBottom:   '#151f2b',
-  zoneA:       '#1d2a3a',
-  zoneB:       '#18242f',
-  zoneEdge:    '#0d131a',
+  // Небо зоны: тёмное у её верха, светлее к земле. Обе зоны красятся
+  // одинаково, чтобы в «стопке» на стыке не было видно шва.
+  zoneSkyTop:  '#16202c',
+  zoneSkyLow:  '#27394d',
   divider:     '#0b1017',
 
   ground:      '#33503a',
@@ -108,9 +109,9 @@ const NONE = 'NONE', LEFT = 'LEFT', RIGHT = 'RIGHT';
 
 // Уровни сложности бота: интервал удара сжимается по мере набора очков.
 const DIFFICULTY = [
-  { id:'easy',   name:'Спокойно', start:0.78, min:0.42, err:0.20 },
-  { id:'normal', name:'Ровно',    start:0.55, min:0.26, err:0.12 },
-  { id:'hard',   name:'Жёстко',   start:0.42, min:0.19, err:0.06 }
+  { id:'easy',   name:'Легко',     start:0.78, min:0.42, err:0.20 },
+  { id:'normal', name:'Нормально', start:0.55, min:0.26, err:0.12 },
+  { id:'hard',   name:'Сложно',    start:0.42, min:0.19, err:0.06 }
 ];
 
 
@@ -278,42 +279,92 @@ function resize() {
   computeLayout();
 }
 
+/*
+ * Две раскладки зон:
+ *  - «стопка» (телефон, экран выше, чем шире): зоны друг над другом, верхняя
+ *    развёрнута на 180° — игроки садятся с двух сторон телефона, и каждому
+ *    достаётся вся ширина экрана под тап;
+ *  - «рядом» (ПК и альбомная): зоны слева и справа, как раньше.
+ */
 function computeLayout() {
-  const zoneW  = W / 2;
-  const ground = Math.max(40, Math.min(H * 0.10, 92));
-  const baseY  = H - ground;                       // линия земли
-  const segH   = Math.max(24, Math.min(zoneW * 0.26, (baseY - H * 0.16) / 7));
-  const scoreSize = Math.round(Math.min(zoneW * 0.26, H * 0.10, 72));
+  const stacked = H >= W;
+  const zw = stacked ? W : W / 2;
+  const zh = stacked ? H / 2 : H;
+
+  const ground = Math.max(28, Math.min(zh * 0.13, 84));
+  const baseY  = zh - ground;                      // линия земли внутри зоны
+  const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 6));
+  const scoreSize = Math.round(Math.min(zw * 0.22, zh * 0.13, 68));
   L = {
-    zoneW,
+    stacked,
+    zw, zh,
     ground,
     baseY,
     segH,
-    trunkW: segH * 0.92,
-    branchLen: Math.min(segH * 0.95, zoneW * 0.26),
+    // В «стопке» зона широкая, а высота сегмента задана по вертикали —
+    // делаем ствол толще, иначе он теряется на широком экране.
+    trunkW: segH * (stacked ? 1.15 : 0.92),
+    branchLen: Math.min(segH * 0.95, zw * 0.26),
     charH: segH * 1.62,
     scoreSize,
-    nameSize: Math.round(Math.min(zoneW * 0.075, 19)),
+    nameSize: Math.round(Math.min(zw * 0.07, 19)),
     hudY: scoreSize * 0.62 + 6,
     visible: Math.ceil(baseY / segH) + 1
   };
   if (players) for (const p of players) if (p.segments.length) ensureTrunk(p);
 }
 
+/** Положение зоны игрока на экране и нужен ли ей разворот на 180°. */
+function zoneRect(p) {
+  if (L.stacked) {
+    return p.index === 0
+      ? { x: 0, y: L.zh, rot: false }   // игрок 1 — снизу, как обычно
+      : { x: 0, y: 0,    rot: true  };  // игрок 2 — сверху, вверх ногами
+  }
+  return { x: p.index * L.zw, y: 0, rot: false };
+}
+
+/** Выполняет fn в локальных координатах зоны (0..L.zw, 0..L.zh) с обрезкой. */
+function withZone(p, fn) {
+  const r = zoneRect(p);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, L.zw, L.zh);
+  ctx.clip();
+  ctx.translate(r.x, r.y);
+  if (r.rot) { ctx.translate(L.zw, L.zh); ctx.rotate(Math.PI); }
+  fn();
+  ctx.restore();
+}
+
 
 /* =========================================================================
    7. ВВОД — только touchstart/pointerdown, без задержек click
    ========================================================================= */
-function zoneOf(x) { return x < W / 2 ? 0 : 1; }
+/** В чью зону попал тап. */
+function playerAt(x, y) {
+  if (L.stacked) return y < L.zh ? players[1] : players[0];
+  return players[x < L.zw ? 0 : 1];
+}
+
+/**
+ * Сторона удара в системе координат самого игрока: для верхней зоны экран
+ * развёрнут, поэтому физически левый край для неё — правый.
+ */
+function sideOfTap(p, x, y) {
+  const r = zoneRect(p);
+  let lx = x - r.x;
+  if (r.rot) lx = L.zw - lx;
+  return lx < L.zw / 2 ? LEFT : RIGHT;
+}
 
 function onPoint(x, y) {
   Sound.unlock();
 
   if (scene === 'play') {
-    const p = players[zoneOf(x)];
+    const p = playerAt(x, y);
     if (p.isBot) return;
-    const localX = x - p.index * L.zoneW;
-    chopAttempt(p, localX < L.zoneW / 2 ? LEFT : RIGHT);
+    chopAttempt(p, sideOfTap(p, x, y));
     return;
   }
 
@@ -419,7 +470,7 @@ function chopAttempt(p, side) {
 
 function spawnChips(p, side) {
   const dir = side === LEFT ? -1 : 1;          // наружу от ствола, в сторону удара
-  const x = L.zoneW / 2 + dir * L.trunkW * 0.5;
+  const x = L.zw / 2 + dir * L.trunkW * 0.5;
   const y = L.baseY - L.segH * 0.55;
   for (let i = 0; i < 12; i++) {
     p.particles.push({
@@ -439,7 +490,7 @@ function spawnChips(p, side) {
 
 function spawnLeaves(p, side) {
   const dir = side === LEFT ? -1 : 1;
-  const x = L.zoneW / 2 + dir * L.trunkW * 0.6;
+  const x = L.zw / 2 + dir * L.trunkW * 0.6;
   const y = L.baseY - L.segH * 0.6;
   for (let i = 0; i < 10; i++) {
     p.particles.push({
@@ -544,13 +595,13 @@ function drawBackground() {
   ctx.fillRect(0, 0, W, H);
 }
 
-function drawGround(zoneW) {
+function drawGround() {
   ctx.fillStyle = PALETTE.groundDark;
-  ctx.fillRect(0, L.baseY, zoneW, H - L.baseY);
+  ctx.fillRect(0, L.baseY, L.zw, L.zh - L.baseY);
   ctx.fillStyle = PALETTE.ground;
-  ctx.fillRect(0, L.baseY, zoneW, Math.min(18, L.ground * 0.25));
+  ctx.fillRect(0, L.baseY, L.zw, Math.min(18, L.ground * 0.25));
   ctx.fillStyle = PALETTE.groundLine;
-  ctx.fillRect(0, L.baseY, zoneW, 3);
+  ctx.fillRect(0, L.baseY, L.zw, 3);
 }
 
 /** Один сегмент ствола. Точка (cx, cy) — его центр. */
@@ -717,16 +768,16 @@ function drawParticles(p) {
 }
 
 function drawScore(p) {
-  const cx = L.zoneW / 2;
+  const cx = L.zw / 2;
 
   // Затемнение под HUD, чтобы цифры читались поверх ствола.
-  const hudH = L.hudY + L.scoreSize + L.nameSize + 46;
+  const hudH = L.hudY + L.scoreSize + L.nameSize + 24;
   const hg = ctx.createLinearGradient(0, 0, 0, hudH);
-  hg.addColorStop(0, 'rgba(8,12,18,0.78)');
-  hg.addColorStop(0.7, 'rgba(8,12,18,0.45)');
+  hg.addColorStop(0, 'rgba(8,12,18,0.50)');
+  hg.addColorStop(0.7, 'rgba(8,12,18,0.22)');
   hg.addColorStop(1, 'rgba(8,12,18,0)');
   ctx.fillStyle = hg;
-  ctx.fillRect(0, 0, L.zoneW, hudH);
+  ctx.fillRect(0, 0, L.zw, hudH);
 
   const pop = 1 + p.scorePop * 0.45;
   ctx.save();
@@ -745,7 +796,7 @@ function drawScore(p) {
   ctx.fillText(p.name, cx, nameY);
 
   // Полоска прогресса до WIN_SCORE
-  const bw = L.zoneW * 0.5, bh = 6;
+  const bw = L.zw * 0.5, bh = 6;
   const bx = cx - bw / 2, by = nameY + L.nameSize + 10;
   ctx.fillStyle = 'rgba(255,255,255,0.10)';
   roundRect(bx, by, bw, bh, 3); ctx.fill();
@@ -753,83 +804,79 @@ function drawScore(p) {
   roundRect(bx, by, bw * Math.min(1, p.score / WIN_SCORE), bh, 3); ctx.fill();
 }
 
-/** Полная отрисовка одной зоны в локальных координатах (0..zoneW, 0..H). */
+/** Полная отрисовка одной зоны в её локальных координатах (0..L.zw, 0..L.zh). */
 function drawZone(p) {
-  const zx = p.index * L.zoneW;
+  withZone(p, () => {
+    // Фон зоны
+    const sky = ctx.createLinearGradient(0, 0, 0, L.baseY);
+    sky.addColorStop(0, PALETTE.zoneSkyTop);
+    sky.addColorStop(1, PALETTE.zoneSkyLow);
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, L.zw, L.zh);
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(zx, 0, L.zoneW, H);
-  ctx.clip();
-  ctx.translate(zx, 0);
-
-  // Фон зоны
-  ctx.fillStyle = p.index === 0 ? PALETTE.zoneA : PALETTE.zoneB;
-  ctx.fillRect(0, 0, L.zoneW, H);
-
-  // Тряска зоны
-  const sh = p.shake > 0 ? p.shake / p.shakeDur : 0;
-  ctx.save();
-  if (sh > 0) {
-    ctx.translate((Math.random() - 0.5) * 2 * p.shakeMag * sh,
-                  (Math.random() - 0.5) * 2 * p.shakeMag * sh);
-  }
-
-  drawGround(L.zoneW);
-
-  // Ствол: снизу вверх, со смещением твина (1 → 0 = сегмент проезжает вниз).
-  const cx = L.zoneW / 2;
-  const slide = easeOut(p.trunkAnim) * L.segH;
-  const count = Math.min(p.segments.length, L.visible + 1);
-  for (let i = count - 1; i >= 0; i--) {
-    const cy = L.baseY - L.segH / 2 - i * L.segH - slide;
-    if (cy - L.segH > H) continue;
-    drawTrunkSegment(cx, cy, L.trunkW, L.segH, i);
-    if (p.segments[i].branch !== NONE) {
-      drawBranch(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
+    // Тряска зоны
+    const sh = p.shake > 0 ? p.shake / p.shakeDur : 0;
+    ctx.save();
+    if (sh > 0) {
+      ctx.translate((Math.random() - 0.5) * 2 * p.shakeMag * sh,
+                    (Math.random() - 0.5) * 2 * p.shakeMag * sh);
     }
-  }
 
-  // Пень под стволом
-  ctx.fillStyle = PALETTE.trunkDark;
-  ctx.fillRect(cx - L.trunkW * 0.62, L.baseY, L.trunkW * 1.24, Math.min(14, L.ground * 0.2));
+    drawGround();
 
-  // Персонаж
-  const charX = cx + (p.side === LEFT ? -1 : 1) * (L.trunkW * 0.5 + L.charH * 0.26);
-  drawLumberjack(charX, L.baseY, p.side, p.chop, p.stun);
+    // Ствол: снизу вверх, со смещением твина (1 → 0 = сегмент проезжает вниз).
+    const cx = L.zw / 2;
+    const slide = easeOut(p.trunkAnim) * L.segH;
+    const count = Math.min(p.segments.length, L.visible + 1);
+    for (let i = count - 1; i >= 0; i--) {
+      const cy = L.baseY - L.segH / 2 - i * L.segH - slide;
+      if (cy - L.segH > L.zh) continue;
+      drawTrunkSegment(cx, cy, L.trunkW, L.segH, i);
+      if (p.segments[i].branch !== NONE) {
+        drawBranch(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
+      }
+    }
 
-  drawParticles(p);
-  ctx.restore(); // тряска
+    // Пень под стволом
+    ctx.fillStyle = PALETTE.trunkDark;
+    ctx.fillRect(cx - L.trunkW * 0.62, L.baseY, L.trunkW * 1.24, Math.min(14, L.ground * 0.2));
 
-  // Вспышка удара
-  if (p.flash > 0) {
-    ctx.globalAlpha = p.flash * 0.16;
-    ctx.fillStyle = PALETTE.flash;
-    ctx.fillRect(0, 0, L.zoneW, H);
-    ctx.globalAlpha = 1;
-  }
-  // Красная вспышка ошеломления
-  if (p.red > 0) {
-    ctx.globalAlpha = p.red * 0.34;
-    ctx.fillStyle = PALETTE.stunTint;
-    ctx.fillRect(0, 0, L.zoneW, H);
-    ctx.globalAlpha = 1;
-    ctx.globalAlpha = Math.min(1, p.red * 1.4);
-    ctx.strokeStyle = PALETTE.danger;
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, L.zoneW - 6, H - 6);
-    ctx.globalAlpha = 1;
-  }
+    // Персонаж
+    const charX = cx + (p.side === LEFT ? -1 : 1) * (L.trunkW * 0.5 + L.charH * 0.26);
+    drawLumberjack(charX, L.baseY, p.side, p.chop, p.stun);
 
-  drawScore(p);
-  ctx.restore(); // клип зоны
+    drawParticles(p);
+    ctx.restore(); // тряска
+
+    // Вспышка удара
+    if (p.flash > 0) {
+      ctx.globalAlpha = p.flash * 0.16;
+      ctx.fillStyle = PALETTE.flash;
+      ctx.fillRect(0, 0, L.zw, L.zh);
+      ctx.globalAlpha = 1;
+    }
+    // Красная вспышка ошеломления
+    if (p.red > 0) {
+      ctx.globalAlpha = p.red * 0.34;
+      ctx.fillStyle = PALETTE.stunTint;
+      ctx.fillRect(0, 0, L.zw, L.zh);
+      ctx.globalAlpha = Math.min(1, p.red * 1.4);
+      ctx.strokeStyle = PALETTE.danger;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(3, 3, L.zw - 6, L.zh - 6);
+      ctx.globalAlpha = 1;
+    }
+
+    drawScore(p);
+  });
 }
 
 function easeOut(t) { return t * t; }   // твин ствола: быстрый старт, мягкий стоп
 
 function drawDivider() {
   ctx.fillStyle = PALETTE.divider;
-  ctx.fillRect(W / 2 - 2, 0, 4, H);
+  if (L.stacked) ctx.fillRect(0, L.zh - 2, W, 4);
+  else           ctx.fillRect(L.zw - 2, 0, 4, H);
 }
 
 function drawCountdown() {
@@ -838,22 +885,27 @@ function drawCountdown() {
     const t = countdown / CD_STEP_TIME;
     label = String(Math.ceil(t));
     frac  = t - Math.floor(t);           // 1 → 0 внутри одной цифры
-    base  = Math.min(W, H) * 0.22;
+    base  = Math.min(L.zw, L.zh) * 0.30;
   } else if (goFlash > 0) {
     label = 'РУБИ!';
     frac  = goFlash / GO_TIME;
-    base  = Math.min(W, H) * 0.15;
+    base  = Math.min(L.zw, L.zh) * 0.20;
   } else {
     return;
   }
 
-  ctx.save();
-  ctx.globalAlpha = 0.25 + frac * 0.7;
-  ctx.fillStyle = PALETTE.accent;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = 'bold ' + Math.round(base * (1 + (1 - frac) * 0.3)) + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(label, W / 2, H * 0.45);
-  ctx.restore();
+  // По отсчёту в каждой зоне — верхний игрок читает свой в своей ориентации.
+  for (const p of players) {
+    withZone(p, () => {
+      ctx.globalAlpha = 0.25 + frac * 0.7;
+      ctx.fillStyle = PALETTE.accent;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = 'bold ' + Math.round(base * (1 + (1 - frac) * 0.3)) +
+                 'px system-ui, -apple-system, sans-serif';
+      ctx.fillText(label, L.zw / 2, L.zh * 0.5);
+      ctx.globalAlpha = 1;
+    });
+  }
 }
 
 
@@ -901,7 +953,8 @@ function drawMenu() {
   button(x, y, bw, bh, 'Против бота', 'сложность: ' + diff.name,
          () => { scene = 'difficulty'; }, true);
   y += bh + 18;
-  button(x, y, bw, bh, 'На двоих', 'один экран, два игрока',
+  button(x, y, bw, bh, 'На двоих',
+         L.stacked ? 'один снизу, второй сверху' : 'один экран, два игрока',
          () => startGame('duo'), false);
 
   ctx.fillStyle = PALETTE.textDim;
@@ -914,14 +967,13 @@ function drawMenu() {
 function drawDifficulty() {
   drawBackground();
   buttons = [];
-  drawTitle('Сложность', 'темп бота и его ошибки');
+  drawTitle('Сложность', null);
 
   const bw = Math.min(W * 0.72, 420), bh = Math.min(H * 0.095, 72);
   const x = (W - bw) / 2;
   let y = H * 0.36;
   for (const d of DIFFICULTY) {
-    button(x, y, bw, bh, d.name,
-           'удар ' + Math.round(d.start * 1000) + '→' + Math.round(d.min * 1000) + ' мс · ошибка ' + Math.round(d.err * 100) + '%',
+    button(x, y, bw, bh, d.name, null,
            () => { diff = d; startGame('bot'); }, d.id === diff.id);
     y += bh + 14;
   }
@@ -938,28 +990,36 @@ function drawGameOver() {
   ctx.fillRect(0, 0, W, H);
 
   buttons = [];
+
+  // Итог рисуем в каждой зоне: проигравший сверху читает его не вверх ногами.
   const pulse = 1 + Math.sin(clock * 4) * 0.03;
-  ctx.save();
-  ctx.translate(W / 2, H * 0.28);
-  ctx.scale(pulse, pulse);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = PALETTE.accent;
-  ctx.font = 'bold ' + Math.round(Math.min(W * 0.12, H * 0.085, 58)) + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText('ПОБЕДА', 0, 0);
-  ctx.restore();
+  const big   = Math.round(Math.min(L.zw * 0.13, L.zh * 0.11, 56));
+  for (const p of players) {
+    withZone(p, () => {
+      const cx = L.zw / 2, cy = L.zh * (L.stacked ? 0.34 : 0.28);
+      const word = p === winner ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = 'bold ' + big + 'px system-ui, -apple-system, sans-serif';
+      // Длинное слово ужимаем, чтобы не упиралось в края зоны.
+      const fit = Math.min(1, (L.zw * 0.82) / ctx.measureText(word).width);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(pulse * fit, pulse * fit);
+      ctx.fillStyle = p === winner ? PALETTE.accent : PALETTE.textDim;
+      ctx.fillText(word, 0, 0);
+      ctx.restore();
 
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = PALETTE.text;
-  ctx.font = 'bold ' + Math.round(Math.min(W * 0.075, 32)) + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(winner ? winner.name : '', W / 2, H * 0.28 + Math.min(W * 0.12, 60));
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = PALETTE.text;
+      ctx.font = 'bold ' + Math.round(big * 0.6) + 'px system-ui, -apple-system, sans-serif';
+      ctx.fillText(players[0].score + ' : ' + players[1].score, cx, cy + big * 1.1);
+    });
+  }
 
-  ctx.fillStyle = PALETTE.textDim;
-  ctx.font = '500 ' + Math.round(Math.min(W * 0.045, 19)) + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(players[0].score + ' : ' + players[1].score, W / 2, H * 0.28 + Math.min(W * 0.12, 60) + 36);
-
-  const bw = Math.min(W * 0.66, 380), bh = Math.min(H * 0.10, 76);
-  const x = (W - bw) / 2;
-  let y = H * 0.58;
+  // Кнопки — одни на двоих, по центру экрана, до них дотягиваются оба.
+  const bw = Math.min(W * 0.66, 380), bh = Math.min(H * 0.09, 72);
+  const x  = (W - bw) / 2;
+  let y = L.stacked ? H / 2 - bh - 8 : H * 0.58;
   button(x, y, bw, bh, 'Ещё раз', null, () => startGame(mode), true);
   y += bh + 16;
   button(x, y, bw, bh * 0.82, 'В меню', null, () => { scene = 'menu'; }, false);
