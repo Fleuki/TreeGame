@@ -35,53 +35,46 @@
       Арт следующего этапа меняет цвета тут и тела draw*-функций ниже.
    ========================================================================= */
 const PALETTE = {
-  skyTop:      '#243447',
-  skyBottom:   '#151f2b',
-  // Небо зоны: тёмное у её верха, светлее к земле. Обе зоны красятся
-  // одинаково, чтобы в «стопке» на стыке не было видно шва.
-  zoneSkyTop:  '#16202c',
-  zoneSkyLow:  '#27394d',
-  divider:     '#0b1017',
+  // Чёрная обводка — основа стиля, ею обводится каждый объект.
+  outline:     '#141210',
 
-  ground:      '#33503a',
-  groundDark:  '#223527',
-  groundLine:  '#3e6144',
+  // Небо зоны: светлое, иначе чёрная обводка не читается.
+  // Обе зоны красятся одинаково, чтобы в «стопке» не было видно шва.
+  zoneSkyTop:  '#a6ebf5',
+  zoneSkyLow:  '#c8f4f8',
+  divider:     '#141210',
 
-  trunk:       '#8a5a34',
-  trunkLight:  '#a06b3f',
-  trunkDark:   '#6a4324',
-  trunkRing:   '#5a3a1f',
+  ground:      '#5ec93c',
+  groundDark:  '#46ab2a',
 
-  branch:      '#7a4b2b',
-  branchDark:  '#5b3720',
-  leaf:        '#3f8149',
-  leafDark:    '#2e6236',
+  trunk:       '#a06a3e',
 
-  skin:        '#f2c496',
-  hair:        '#4a3324',
-  shirt:       '#d8483f',
-  shirtDark:   '#a63329',
-  pants:       '#33506f',
-  boots:       '#2a2119',
-  axeHandle:   '#b8813f',
-  axeBlade:    '#d5dde5',
-  axeBladeDark:'#98a5b0',
+  branch:      '#6f4423',
+  leaf:        '#5ec93a',
+  leafDot:     '#ffc63d',
 
-  chip:        '#c9924e',
-  chipDark:    '#9c6c34',
+  skin:        '#f7d3a6',
+  hair:        '#3a2a1d',
+  shirt:       '#ea5348',
+  pants:       '#3f5f8f',
+  boots:       '#2c2620',
+  axeHandle:   '#c08b4a',
+  axeBlade:    '#eef3f7',
 
-  text:        '#eef3f8',
-  textDim:     '#8ba0b6',
-  accent:      '#f2b134',
-  danger:      '#e94b3c',
-  ok:          '#4fc06a',
+  chip:        '#c9853d',
+  chipDark:    '#8f5a26',
 
-  btn:         '#27384c',
-  btnHi:       '#35506d',
-  btnBorder:   '#4f7396',
+  text:        '#1d1a16',
+  textDim:     '#5d6b63',
+  white:       '#ffffff',
+  accent:      '#ffc63d',
+  danger:      '#e8443a',
+
+  btn:         '#ffffff',
+  btnHi:       '#ffc63d',
 
   flash:       '#ffffff',
-  stunTint:    '#e94b3c'
+  stunTint:    '#ff4a3d'
 };
 
 
@@ -295,20 +288,41 @@ function computeLayout() {
   const baseY  = zh - ground;                      // линия земли внутри зоны
   const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 6));
   const scoreSize = Math.round(Math.min(zw * 0.22, zh * 0.13, 68));
+
+  // Толщина чёрной обводки — 4–6 px, чуть тянется за размером сегмента.
+  const line = Math.max(4, Math.min(segH * 0.11, 6));
+
+  // В «стопке» зона широкая, а высота сегмента задана по вертикали —
+  // делаем ствол толще, иначе он теряется на широком экране.
+  const trunkW = segH * (stacked ? 1.15 : 0.92);
+
+  // Ветка — самый заметный объект: толстая «рука» и крупная крона.
+  // Крона приплюснута: по высоте она должна укладываться в один сегмент,
+  // иначе кроны соседних веток слипаются и не видно, где какая.
+  let branchLen = segH * 1.00;
+  let leafR     = segH * 0.48;
+  const maxReach = zw * 0.47 - trunkW / 2;
+  const reach    = branchLen + leafR * 1.72;   // 1.72 — вынос крайнего кома кроны
+  if (reach > maxReach) {
+    const k = maxReach / reach;
+    branchLen *= k;
+    leafR     *= k;
+  }
+
   L = {
     stacked,
     zw, zh,
     ground,
     baseY,
     segH,
-    // В «стопке» зона широкая, а высота сегмента задана по вертикали —
-    // делаем ствол толще, иначе он теряется на широком экране.
-    trunkW: segH * (stacked ? 1.15 : 0.92),
-    branchLen: Math.min(segH * 0.95, zw * 0.26),
-    charH: segH * 1.62,
+    line,
+    trunkW,
+    branchLen,
+    leafR,
+    // Персонаж крупный: обводка в 4–6 px съедает мелкую фигуру.
+    charH: segH * 2.15,
     scoreSize,
     nameSize: Math.round(Math.min(zw * 0.07, 19)),
-    hudY: scoreSize * 0.62 + 6,
     visible: Math.ceil(baseY / segH) + 1
   };
   if (players) for (const p of players) if (p.segments.length) ensureTrunk(p);
@@ -503,7 +517,7 @@ function spawnLeaves(p, side) {
       size: 4 + Math.random() * 5,
       rot: Math.random() * 6.28,
       spin: (Math.random() - 0.5) * 12,
-      color: Math.random() < 0.5 ? PALETTE.leaf : PALETTE.leafDark
+      color: Math.random() < 0.5 ? PALETTE.leaf : PALETTE.leafDot
     });
   }
 }
@@ -587,10 +601,43 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+/* ---------- Обводка: общая для всех объектов ---------- */
+
+/** Ставит перо чёрной обводки со скруглёнными стыками. */
+function setOutline(w) {
+  ctx.strokeStyle = PALETTE.outline;
+  ctx.lineWidth = w || L.line;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+}
+
+/** Заливает текущий путь и обводит его чёрным. */
+function fillStroke(color, w) {
+  ctx.fillStyle = color;
+  ctx.fill();
+  setOutline(w);
+  ctx.stroke();
+}
+
+function circlePath(x, y, r) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, 6.2832);
+}
+
+/** Толстая линия с круглыми торцами и обводкой: «рука» ветки, топорище. */
+function outlinedBar(x0, y0, x1, y1, th, color) {
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+  setOutline(th + L.line * 2);
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = th;
+  ctx.stroke();
+}
+
 function drawBackground() {
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, PALETTE.skyTop);
-  g.addColorStop(1, PALETTE.skyBottom);
+  g.addColorStop(0, PALETTE.zoneSkyTop);
+  g.addColorStop(1, PALETTE.zoneSkyLow);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 }
@@ -599,57 +646,49 @@ function drawGround() {
   ctx.fillStyle = PALETTE.groundDark;
   ctx.fillRect(0, L.baseY, L.zw, L.zh - L.baseY);
   ctx.fillStyle = PALETTE.ground;
-  ctx.fillRect(0, L.baseY, L.zw, Math.min(18, L.ground * 0.25));
-  ctx.fillStyle = PALETTE.groundLine;
-  ctx.fillRect(0, L.baseY, L.zw, 3);
+  ctx.fillRect(0, L.baseY, L.zw, Math.max(10, L.ground * 0.45));
 }
 
-/** Один сегмент ствола. Точка (cx, cy) — его центр. */
-function drawTrunkSegment(cx, cy, w, h, index) {
-  ctx.fillStyle = PALETTE.trunk;
-  ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
-
-  ctx.fillStyle = PALETTE.trunkLight;
-  ctx.fillRect(cx - w / 2, cy - h / 2, w * 0.22, h);
-  ctx.fillStyle = PALETTE.trunkDark;
-  ctx.fillRect(cx + w / 2 - w * 0.18, cy - h / 2, w * 0.18, h);
-
-  // Кольцо-стык между сегментами.
-  ctx.fillStyle = PALETTE.trunkRing;
-  ctx.fillRect(cx - w / 2, cy + h / 2 - 2, w, 2);
-
-  // Пара «сучков» для читаемости шага.
-  if (index % 2 === 0) {
-    ctx.fillStyle = PALETTE.trunkDark;
-    ctx.beginPath();
-    ctx.ellipse(cx + w * 0.08, cy, w * 0.10, h * 0.14, 0, 0, 6.2832);
-    ctx.fill();
-  }
+/**
+ * Ствол — один ровный прямоугольник со скруглёнными торцами и обводкой,
+ * без полос и сучков. Сегменты остаются только в логике; ход рубки
+ * читается по тому, как съезжают вниз ветки.
+ */
+function drawTrunk(cx, topY, botY, w) {
+  roundRect(cx - w / 2, topY, w, botY - topY, w * 0.30);
+  fillStroke(PALETTE.trunk);
 }
 
-/** Ветка на сегменте. side — LEFT|RIGHT. */
+/**
+ * Ветка — самый заметный объект на экране: короткая толстая тёмно-коричневая
+ * «рука» от ствола и крупная ярко-зелёная крона.
+ * Крона собирается из комов: сначала все чёрные подложки, поверх — все
+ * зелёные. Так силуэт получает одну общую обводку без швов внутри.
+ */
 function drawBranch(cx, cy, side, w, h) {
   const dir = side === LEFT ? -1 : 1;
-  const len = L.branchLen;
-  const th  = h * 0.34;
-  const x0  = cx + dir * (w / 2 - 2);
+  const x0  = cx + dir * (w / 2 - L.line);
+  const x1  = x0 + dir * L.branchLen;
+  const r   = L.leafR;
 
-  ctx.fillStyle = PALETTE.branch;
-  ctx.fillRect(Math.min(x0, x0 + dir * len), cy - th / 2, len, th);
-  ctx.fillStyle = PALETTE.branchDark;
-  ctx.fillRect(Math.min(x0, x0 + dir * len), cy + th / 2 - 3, len, 3);
+  outlinedBar(x0, cy, x1, cy, r * 0.46, PALETTE.branch);
 
-  // Листва пучком на конце.
-  const lx = x0 + dir * len, ly = cy;
+  const fx = x1 + dir * r * 0.55, fy = cy;
+  const blobs = [
+    [0, 0, r],
+    [-dir * r * 0.80, -r * 0.26, r * 0.72],
+    [ dir * r * 0.60, -r * 0.30, r * 0.62],
+    [-dir * r * 0.20,  r * 0.34, r * 0.60]
+  ];
+
+  ctx.fillStyle = PALETTE.outline;
+  for (const b of blobs) { circlePath(fx + b[0], fy + b[1], b[2] + L.line); ctx.fill(); }
   ctx.fillStyle = PALETTE.leaf;
-  ctx.beginPath();
-  ctx.arc(lx, ly - th * 0.2, th * 0.95, 0, 6.2832);
-  ctx.arc(lx - dir * th * 0.8, ly + th * 0.2, th * 0.75, 0, 6.2832);
-  ctx.fill();
-  ctx.fillStyle = PALETTE.leafDark;
-  ctx.beginPath();
-  ctx.arc(lx + dir * th * 0.35, ly + th * 0.45, th * 0.55, 0, 6.2832);
-  ctx.fill();
+  for (const b of blobs) { circlePath(fx + b[0], fy + b[1], b[2]); ctx.fill(); }
+
+  // Акцент в центре кроны — как на референсе.
+  circlePath(fx, fy, r * 0.26);
+  fillStroke(PALETTE.leafDot, Math.max(3, L.line * 0.7));
 }
 
 /**
@@ -661,8 +700,8 @@ function drawLumberjack(x, baseY, side, chopT, stunT) {
   const dir  = side === LEFT ? 1 : -1;     // куда смотрит (к стволу)
   const prog = chopT > 0 ? 1 - chopT / CHOP_TIME : 1;   // 0 — замах, 1 — удар
   const swing = chopT > 0
-    ? (prog < 0.35 ? -0.9 * (prog / 0.35)                     // замах назад
-                   : -0.9 + 3.1 * Math.pow((prog - 0.35) / 0.65, 0.6)) // удар
+    ? (prog < 0.35 ? -0.75 * (prog / 0.35)                    // замах назад
+                   : -0.75 + 1.70 * Math.pow((prog - 0.35) / 0.65, 0.6)) // удар
     : 0.35;                                                    // покой
   const wob = stunT > 0 ? Math.sin(clock * 38) * 0.16 : 0;
 
@@ -671,64 +710,64 @@ function drawLumberjack(x, baseY, side, chopT, stunT) {
   ctx.scale(dir, 1);
   ctx.rotate(wob);
 
-  const bodyW = h * 0.34;
+  // Фигура приземистая и широкая: узкие детали обводка в 4–6 px съедает.
+  const bodyW = h * 0.50;
+  const lw    = Math.max(4, L.line * 0.8);   // обводка персонажа чуть тоньше
 
   // Ноги
-  ctx.fillStyle = PALETTE.pants;
-  ctx.fillRect(-bodyW * 0.45, -h * 0.34, bodyW * 0.38, h * 0.34);
-  ctx.fillRect( bodyW * 0.07, -h * 0.34, bodyW * 0.38, h * 0.34);
-  ctx.fillStyle = PALETTE.boots;
-  ctx.fillRect(-bodyW * 0.5, -h * 0.06, bodyW * 0.48, h * 0.06);
-  ctx.fillRect( bodyW * 0.04, -h * 0.06, bodyW * 0.48, h * 0.06);
+  roundRect(-bodyW * 0.42, -h * 0.24, bodyW * 0.34, h * 0.24, bodyW * 0.15);
+  fillStroke(PALETTE.pants, lw);
+  roundRect( bodyW * 0.08, -h * 0.24, bodyW * 0.34, h * 0.24, bodyW * 0.15);
+  fillStroke(PALETTE.pants, lw);
+  // Ботинки — шире ног, чтобы фигура стояла
+  roundRect(-bodyW * 0.48, -h * 0.09, bodyW * 0.44, h * 0.09, bodyW * 0.13);
+  fillStroke(PALETTE.boots, lw);
+  roundRect( bodyW * 0.04, -h * 0.09, bodyW * 0.44, h * 0.09, bodyW * 0.13);
+  fillStroke(PALETTE.boots, lw);
 
   // Корпус, чуть подаётся вперёд на ударе
   const lean = chopT > 0 ? 0.12 * Math.sin(prog * Math.PI) : 0;
   ctx.save();
-  ctx.translate(0, -h * 0.34);
+  ctx.translate(0, -h * 0.24);
   ctx.rotate(lean);
-  ctx.fillStyle = PALETTE.shirt;
-  roundRect(-bodyW / 2, -h * 0.32, bodyW, h * 0.34, bodyW * 0.2);
-  ctx.fill();
-  ctx.fillStyle = PALETTE.shirtDark;
-  ctx.fillRect(-bodyW * 0.08, -h * 0.32, bodyW * 0.16, h * 0.34);
+
+  roundRect(-bodyW / 2, -h * 0.34, bodyW, h * 0.36, bodyW * 0.30);
+  fillStroke(PALETTE.shirt, lw);
 
   // Голова
-  ctx.fillStyle = PALETTE.skin;
+  const headY = -h * 0.48, headR = h * 0.175;
+  circlePath(bodyW * 0.05, headY, headR);
+  fillStroke(PALETTE.skin, lw);
+
+  // Шапка
   ctx.beginPath();
-  ctx.arc(bodyW * 0.06, -h * 0.42, h * 0.115, 0, 6.2832);
-  ctx.fill();
-  ctx.fillStyle = PALETTE.hair;
-  ctx.beginPath();
-  ctx.arc(bodyW * 0.02, -h * 0.46, h * 0.105, Math.PI, 0);
-  ctx.fill();
+  ctx.arc(bodyW * 0.05, headY - headR * 0.30, headR, Math.PI * 1.04, Math.PI * 2.06);
+  ctx.closePath();
+  fillStroke(PALETTE.hair, lw);
+
   // Глаз
-  ctx.fillStyle = '#20242a';
+  ctx.fillStyle = PALETTE.outline;
   if (stunT > 0) {
-    ctx.fillRect(bodyW * 0.12, -h * 0.435, h * 0.035, h * 0.012);
+    roundRect(bodyW * 0.16, headY + headR * 0.02, headR * 0.42, headR * 0.12, headR * 0.06);
+    ctx.fill();
   } else {
-    ctx.beginPath();
-    ctx.arc(bodyW * 0.14, -h * 0.43, h * 0.016, 0, 6.2832);
+    circlePath(bodyW * 0.22, headY + headR * 0.08, headR * 0.15);
     ctx.fill();
   }
 
   // Рука с топором
   ctx.save();
-  ctx.translate(bodyW * 0.16, -h * 0.22);
+  ctx.translate(bodyW * 0.16, -h * 0.20);
   ctx.rotate(swing);
-  ctx.fillStyle = PALETTE.skin;
-  ctx.fillRect(0, -h * 0.035, h * 0.10, h * 0.07);
-  ctx.fillStyle = PALETTE.axeHandle;
-  ctx.fillRect(h * 0.06, -h * 0.028, h * 0.34, h * 0.056);
-  ctx.fillStyle = PALETTE.axeBlade;
+  outlinedBar(0, 0, h * 0.12, 0, h * 0.085, PALETTE.skin);
+  outlinedBar(h * 0.08, 0, h * 0.38, 0, h * 0.07, PALETTE.axeHandle);
   ctx.beginPath();
-  ctx.moveTo(h * 0.36, -h * 0.13);
-  ctx.lineTo(h * 0.50, -h * 0.05);
-  ctx.lineTo(h * 0.50,  h * 0.05);
-  ctx.lineTo(h * 0.36,  h * 0.13);
+  ctx.moveTo(h * 0.34, -h * 0.14);
+  ctx.lineTo(h * 0.52, -h * 0.06);
+  ctx.lineTo(h * 0.52,  h * 0.06);
+  ctx.lineTo(h * 0.34,  h * 0.14);
   ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = PALETTE.axeBladeDark;
-  ctx.fillRect(h * 0.34, -h * 0.09, h * 0.035, h * 0.18);
+  fillStroke(PALETTE.axeBlade, lw);
   ctx.restore();
 
   ctx.restore(); // корпус
@@ -736,19 +775,21 @@ function drawLumberjack(x, baseY, side, chopT, stunT) {
 
   // Значок ошеломления — крутящиеся звёздочки над головой.
   if (stunT > 0) {
-    const cx = x, cy = baseY - h * 1.05;
+    const cx = x, cy = baseY - h * 1.10;
     ctx.save();
     ctx.globalAlpha = Math.min(1, stunT / 0.15);
     for (let i = 0; i < 3; i++) {
       const a = clock * 7 + i * 2.094;
-      ctx.fillStyle = PALETTE.accent;
-      ctx.beginPath();
-      ctx.arc(cx + Math.cos(a) * h * 0.22, cy + Math.sin(a) * h * 0.07, h * 0.035, 0, 6.2832);
-      ctx.fill();
+      circlePath(cx + Math.cos(a) * h * 0.24, cy + Math.sin(a) * h * 0.08, h * 0.045);
+      fillStroke(PALETTE.accent, Math.max(3, L.line * 0.7));
     }
     ctx.fillStyle = PALETTE.danger;
-    ctx.font = 'bold ' + Math.round(h * 0.28) + 'px system-ui, -apple-system, sans-serif';
+    ctx.strokeStyle = PALETTE.outline;
+    ctx.lineWidth = L.line;
+    ctx.lineJoin = 'round';
+    ctx.font = 'bold ' + Math.round(h * 0.34) + 'px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.strokeText('!', cx, cy - h * 0.02);
     ctx.fillText('!', cx, cy - h * 0.02);
     ctx.restore();
   }
@@ -767,41 +808,49 @@ function drawParticles(p) {
   }
 }
 
+/**
+ * Счёт живёт у края зоны, а не по центру ствола: имя мелко, счёт крупно,
+ * под ними полоска прогресса до WIN_SCORE. Игровое поле остаётся чистым.
+ */
 function drawScore(p) {
-  const cx = L.zw / 2;
+  const m  = Math.max(12, L.zw * 0.045);
+  const sz = L.scoreSize;
 
-  // Затемнение под HUD, чтобы цифры читались поверх ствола.
-  const hudH = L.hudY + L.scoreSize + L.nameSize + 24;
-  const hg = ctx.createLinearGradient(0, 0, 0, hudH);
-  hg.addColorStop(0, 'rgba(8,12,18,0.50)');
-  hg.addColorStop(0.7, 'rgba(8,12,18,0.22)');
-  hg.addColorStop(1, 'rgba(8,12,18,0)');
-  ctx.fillStyle = hg;
-  ctx.fillRect(0, 0, L.zw, hudH);
+  // Имя — мелко, над плашкой.
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillStyle = PALETTE.text;
+  ctx.font = '700 ' + L.nameSize + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(p.name, m + L.line, m);
 
-  const pop = 1 + p.scorePop * 0.45;
+  // Счёт — крупно на белой плашке: читается и поверх листвы.
+  ctx.font = 'bold ' + sz + 'px system-ui, -apple-system, sans-serif';
+  const tw = ctx.measureText(String(p.score)).width;
+  const pw = Math.max(sz * 1.5, tw + sz * 0.7);
+  const ph = sz * 1.18;
+  const py = m + L.nameSize * 1.35;
+
+  const pop = 1 + p.scorePop * 0.22;
   ctx.save();
-  ctx.translate(cx, L.hudY);
+  ctx.translate(m, py);
   ctx.scale(pop, pop);
+  roundRect(0, 0, pw, ph, ph * 0.32);
+  fillStroke(p.scorePop > 0.5 ? PALETTE.accent : PALETTE.white);
+  ctx.fillStyle = PALETTE.text;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = p.scorePop > 0.5 ? PALETTE.accent : PALETTE.text;
-  ctx.font = 'bold ' + L.scoreSize + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(String(p.score), 0, 0);
+  ctx.font = 'bold ' + sz + 'px system-ui, -apple-system, sans-serif';
+  ctx.fillText(String(p.score), pw / 2, ph * 0.54);
   ctx.restore();
 
-  const nameY = L.hudY + L.scoreSize * 0.58;
-  ctx.fillStyle = PALETTE.textDim;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.font = '600 ' + L.nameSize + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(p.name, cx, nameY);
-
   // Полоска прогресса до WIN_SCORE
-  const bw = L.zw * 0.5, bh = 6;
-  const bx = cx - bw / 2, by = nameY + L.nameSize + 10;
-  ctx.fillStyle = 'rgba(255,255,255,0.10)';
-  roundRect(bx, by, bw, bh, 3); ctx.fill();
-  ctx.fillStyle = PALETTE.accent;
-  roundRect(bx, by, bw * Math.min(1, p.score / WIN_SCORE), bh, 3); ctx.fill();
+  const bh = Math.max(9, L.line * 1.8);
+  const by = py + ph + bh * 1.1;
+  roundRect(m, by, pw, bh, bh / 2);
+  fillStroke(PALETTE.white, Math.max(3, L.line * 0.6));
+  const done = pw * Math.min(1, p.score / WIN_SCORE);
+  if (done > bh) {
+    roundRect(m, by, done, bh, bh / 2);
+    fillStroke(PALETTE.accent, Math.max(3, L.line * 0.6));
+  }
 }
 
 /** Полная отрисовка одной зоны в её локальных координатах (0..L.zw, 0..L.zh). */
@@ -824,25 +873,24 @@ function drawZone(p) {
 
     drawGround();
 
-    // Ствол: снизу вверх, со смещением твина (1 → 0 = сегмент проезжает вниз).
+    // Ствол одной фигурой снизу доверху, со смещением твина
+    // (1 → 0 = дерево проезжает вниз на один сегмент).
     const cx = L.zw / 2;
     const slide = easeOut(p.trunkAnim) * L.segH;
     const count = Math.min(p.segments.length, L.visible + 1);
+    const topY = L.baseY - count * L.segH - slide;
+    drawTrunk(cx, topY, L.baseY, L.trunkW);
+
+    // Ветки поверх ствола, каждая на своём сегменте.
     for (let i = count - 1; i >= 0; i--) {
+      if (p.segments[i].branch === NONE) continue;
       const cy = L.baseY - L.segH / 2 - i * L.segH - slide;
       if (cy - L.segH > L.zh) continue;
-      drawTrunkSegment(cx, cy, L.trunkW, L.segH, i);
-      if (p.segments[i].branch !== NONE) {
-        drawBranch(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
-      }
+      drawBranch(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
     }
 
-    // Пень под стволом
-    ctx.fillStyle = PALETTE.trunkDark;
-    ctx.fillRect(cx - L.trunkW * 0.62, L.baseY, L.trunkW * 1.24, Math.min(14, L.ground * 0.2));
-
-    // Персонаж
-    const charX = cx + (p.side === LEFT ? -1 : 1) * (L.trunkW * 0.5 + L.charH * 0.26);
+    // Персонаж вплотную к стволу
+    const charX = cx + (p.side === LEFT ? -1 : 1) * (L.trunkW * 0.5 + L.charH * 0.19);
     drawLumberjack(charX, L.baseY, p.side, p.chop, p.stun);
 
     drawParticles(p);
@@ -857,13 +905,13 @@ function drawZone(p) {
     }
     // Красная вспышка ошеломления
     if (p.red > 0) {
-      ctx.globalAlpha = p.red * 0.34;
+      ctx.globalAlpha = p.red * 0.22;
       ctx.fillStyle = PALETTE.stunTint;
       ctx.fillRect(0, 0, L.zw, L.zh);
       ctx.globalAlpha = Math.min(1, p.red * 1.4);
       ctx.strokeStyle = PALETTE.danger;
-      ctx.lineWidth = 6;
-      ctx.strokeRect(3, 3, L.zw - 6, L.zh - 6);
+      ctx.lineWidth = L.line * 1.6;
+      ctx.strokeRect(L.line, L.line, L.zw - L.line * 2, L.zh - L.line * 2);
       ctx.globalAlpha = 1;
     }
 
@@ -874,9 +922,19 @@ function drawZone(p) {
 function easeOut(t) { return t * t; }   // твин ствола: быстрый старт, мягкий стоп
 
 function drawDivider() {
+  const t = L.line * 1.4;
   ctx.fillStyle = PALETTE.divider;
-  if (L.stacked) ctx.fillRect(0, L.zh - 2, W, 4);
-  else           ctx.fillRect(L.zw - 2, 0, 4, H);
+  if (L.stacked) ctx.fillRect(0, L.zh - t / 2, W, t);
+  else           ctx.fillRect(L.zw - t / 2, 0, t, H);
+}
+
+/** Крупный текст в стиле игры: белая заливка, чёрная обводка. */
+function outlinedText(text, x, y, size, color) {
+  ctx.font = 'bold ' + Math.round(size) + 'px system-ui, -apple-system, sans-serif';
+  setOutline(Math.max(4, Math.min(size * 0.10, 7)));
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = color || PALETTE.white;
+  ctx.fillText(text, x, y);
 }
 
 function drawCountdown() {
@@ -897,12 +955,10 @@ function drawCountdown() {
   // По отсчёту в каждой зоне — верхний игрок читает свой в своей ориентации.
   for (const p of players) {
     withZone(p, () => {
-      ctx.globalAlpha = 0.25 + frac * 0.7;
-      ctx.fillStyle = PALETTE.accent;
+      ctx.globalAlpha = 0.3 + frac * 0.7;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.font = 'bold ' + Math.round(base * (1 + (1 - frac) * 0.3)) +
-                 'px system-ui, -apple-system, sans-serif';
-      ctx.fillText(label, L.zw / 2, L.zh * 0.5);
+      outlinedText(label, L.zw / 2, L.zh * 0.5,
+                   base * (1 + (1 - frac) * 0.3), PALETTE.accent);
       ctx.globalAlpha = 1;
     });
   }
@@ -912,10 +968,8 @@ function drawCountdown() {
 /* ---------- Экраны меню ---------- */
 function button(x, y, w, h, label, sub, action, hi) {
   buttons.push({ x, y, w, h, action });
-  ctx.fillStyle = hi ? PALETTE.btnHi : PALETTE.btn;
-  roundRect(x, y, w, h, 14); ctx.fill();
-  ctx.strokeStyle = PALETTE.btnBorder; ctx.lineWidth = 2;
-  roundRect(x, y, w, h, 14); ctx.stroke();
+  roundRect(x, y, w, h, h * 0.28);
+  fillStroke(hi ? PALETTE.btnHi : PALETTE.btn, Math.max(4, L.line));
 
   ctx.fillStyle = PALETTE.text;
   ctx.textAlign = 'center';
@@ -932,9 +986,7 @@ function button(x, y, w, h, label, sub, action, hi) {
 
 function drawTitle(title, subtitle) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = PALETTE.text;
-  ctx.font = 'bold ' + Math.round(Math.min(W * 0.13, H * 0.09, 64)) + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(title, W / 2, H * 0.20);
+  outlinedText(title, W / 2, H * 0.20, Math.min(W * 0.13, H * 0.09, 64));
   if (subtitle) {
     ctx.fillStyle = PALETTE.textDim;
     ctx.font = '500 ' + Math.round(Math.min(W * 0.045, 20)) + 'px system-ui, -apple-system, sans-serif';
@@ -986,7 +1038,7 @@ function drawGameOver() {
   for (const p of players) drawZone(p);
   drawDivider();
 
-  ctx.fillStyle = 'rgba(10,15,21,0.78)';
+  ctx.fillStyle = 'rgba(20,18,16,0.55)';
   ctx.fillRect(0, 0, W, H);
 
   buttons = [];
@@ -1005,14 +1057,12 @@ function drawGameOver() {
       ctx.save();
       ctx.translate(cx, cy);
       ctx.scale(pulse * fit, pulse * fit);
-      ctx.fillStyle = p === winner ? PALETTE.accent : PALETTE.textDim;
-      ctx.fillText(word, 0, 0);
+      outlinedText(word, 0, 0, big, p === winner ? PALETTE.accent : PALETTE.white);
       ctx.restore();
 
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = PALETTE.text;
-      ctx.font = 'bold ' + Math.round(big * 0.6) + 'px system-ui, -apple-system, sans-serif';
-      ctx.fillText(players[0].score + ' : ' + players[1].score, cx, cy + big * 1.1);
+      outlinedText(players[0].score + ' : ' + players[1].score,
+                   cx, cy + big * 1.1, big * 0.6);
     });
   }
 
