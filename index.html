@@ -47,9 +47,9 @@ const PALETTE = {
   ground:      '#5ec93c',
   groundDark:  '#46ab2a',
 
+  // Ветка красится этим же цветом — отдельной константы у неё нет.
   trunk:       '#a06a3e',
 
-  branch:      '#6f4423',
   leaf:        '#5ec93a',
   leafDot:     '#ffc63d',
 
@@ -309,9 +309,11 @@ function computeLayout() {
   // Крона приплюснута: по высоте она должна укладываться в один сегмент,
   // иначе кроны соседних веток слипаются и не видно, где какая.
   let branchLen = segH * 1.00;
-  let leafR     = segH * 0.48;
+  let leafR     = segH * 0.52;
   const maxReach = zw * 0.47 - trunkW / 2;
-  const reach    = branchLen + leafR * 1.72;   // 1.72 — вынос крайнего кома кроны
+  // 2.38 = вынос центра кроны (0.45) плюс её полуширина с гребнем волны,
+  // всё в долях leafR.
+  const reach    = branchLen + leafR * 2.19;
   if (reach > maxReach) {
     const k = maxReach / reach;
     branchLen *= k;
@@ -328,6 +330,10 @@ function computeLayout() {
     trunkW,
     branchLen,
     leafR,
+    // Крона — приплюснутый овал. Соседние кроны могут слегка находить
+    // друг на друга: у каждой своя обводка, и они читаются как две.
+    crownRx: leafR * 1.35,
+    crownRy: leafR * 1.02,
     // Персонаж крупный: он главный на экране и должен быть заметнее веток.
     charH: segH * 2.9,
     scoreSize,
@@ -713,29 +719,95 @@ function drawTrunk(cx, topY, botY, w) {
  * Крона собирается из комов: сначала все чёрные подложки, поверх — все
  * зелёные. Так силуэт получает одну общую обводку без швов внутри.
  */
-function drawBranch(cx, cy, side, w, h) {
+/**
+ * Ветка растёт из ствола дугой вверх. Рисуется в два приёма:
+ *  - drawBranchArm — дуга и наплыв у основания. Вызывается ДО ствола,
+ *    чтобы обводка ствола перекрыла стык;
+ *  - drawBranchCrown — крона на конце дуги, поверх ствола.
+ * Хитбокс не меняется: логике по-прежнему важна только сторона ветки.
+ */
+
+/** Конец дуги ветки — точка, где сидит крона. */
+function branchTip(cx, cy, dir, w) {
+  const x0 = cx + dir * (w / 2 - L.line);
+  return {
+    x0, y0: cy,
+    // Контрольная точка: от ствола уходит вбок, потом плавно вверх.
+    kx: x0 + dir * L.branchLen * 0.62, ky: cy,
+    x1: x0 + dir * L.branchLen, y1: cy - L.branchLen * 0.40
+  };
+}
+
+/**
+ * Строит путь дуги переменной толщины: от w0 у ствола до w1 на конце.
+ * Канва не умеет сужать штрих, поэтому собираем контур сами по нормалям.
+ */
+function taperedArcPath(a, w0, w1) {
+  const N = 16;
+  const up = [], down = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, mt = 1 - t;
+    const px = mt * mt * a.x0 + 2 * mt * t * a.kx + t * t * a.x1;
+    const py = mt * mt * a.y0 + 2 * mt * t * a.ky + t * t * a.y1;
+    const dx = 2 * mt * (a.kx - a.x0) + 2 * t * (a.x1 - a.kx);
+    const dy = 2 * mt * (a.ky - a.y0) + 2 * t * (a.y1 - a.ky);
+    const d  = Math.hypot(dx, dy) || 1;
+    const hw = (w0 + (w1 - w0) * t) / 2;
+    up.push([px - dy / d * hw, py + dx / d * hw]);
+    down.push([px + dy / d * hw, py - dx / d * hw]);
+  }
+  ctx.beginPath();
+  ctx.moveTo(up[0][0], up[0][1]);
+  for (let i = 1; i <= N; i++) ctx.lineTo(up[i][0], up[i][1]);
+  for (let i = N; i >= 0; i--) ctx.lineTo(down[i][0], down[i][1]);
+  ctx.closePath();
+}
+
+/** Дуга ветки с наплывом у основания. Цвет — тот же, что у ствола. */
+function drawBranchArm(cx, cy, side, w, h) {
   const dir = side === LEFT ? -1 : 1;
-  const x0  = cx + dir * (w / 2 - L.line);
-  const x1  = x0 + dir * L.branchLen;
-  const r   = L.leafR;
+  const a   = branchTip(cx, cy, dir, w);
+  const w0  = L.leafR * 0.62;              // у ствола толще
+  const w1  = L.leafR * 0.40;              // к концу тоньше
+  // Наплыв: сливается с контуром ствола, стык прячется под ним.
+  const sx = a.x0 + dir * w0 * 0.15, sr = w0 * 0.78;
 
-  outlinedBar(x0, cy, x1, cy, r * 0.46, PALETTE.branch);
+  // Подложка обводки: обводим обе фигуры, потом заливаем — так силуэт
+  // получает одну общую обводку без шва между дугой и наплывом.
+  setOutline(L.line * 2);
+  taperedArcPath(a, w0, w1); ctx.stroke();
+  circlePath(sx, cy, sr);    ctx.stroke();
 
-  const fx = x1 + dir * r * 0.55, fy = cy;
-  const blobs = [
-    [0, 0, r],
-    [-dir * r * 0.80, -r * 0.26, r * 0.72],
-    [ dir * r * 0.60, -r * 0.30, r * 0.62],
-    [-dir * r * 0.20,  r * 0.34, r * 0.60]
-  ];
+  ctx.fillStyle = PALETTE.trunk;
+  taperedArcPath(a, w0, w1); ctx.fill();
+  circlePath(sx, cy, sr);    ctx.fill();
+}
 
-  ctx.fillStyle = PALETTE.outline;
-  for (const b of blobs) { circlePath(fx + b[0], fy + b[1], b[2] + L.line); ctx.fill(); }
-  ctx.fillStyle = PALETTE.leaf;
-  for (const b of blobs) { circlePath(fx + b[0], fy + b[1], b[2]); ctx.fill(); }
+/** Крона: плоский зелёный овал с волнистым краем и смещённым бликом. */
+function drawBranchCrown(cx, cy, side, w, h) {
+  const dir = side === LEFT ? -1 : 1;
+  const a   = branchTip(cx, cy, dir, w);
+  const rx  = L.crownRx, ry = L.crownRy;
+  const fx  = a.x1 + dir * rx * 0.45;
+  const fy  = a.y1 - ry * 0.15;
 
-  // Акцент в центре кроны — как на референсе.
-  circlePath(fx, fy, r * 0.26);
+  const N = 40;
+  ctx.beginPath();
+  for (let i = 0; i <= N; i++) {
+    const ang = i / N * 6.2832;
+    // Две гармоники дают неровный край; dir разворачивает волну,
+    // чтобы левые и правые кроны не были клонами.
+    const k = 1 + 0.08 * Math.sin(5 * ang * dir + 0.6)
+                + 0.05 * Math.sin(8 * ang * dir + 2.0);
+    const px = fx + Math.cos(ang) * rx * k;
+    const py = fy + Math.sin(ang) * ry * k;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  fillStroke(PALETTE.leaf);
+
+  // Блик смещён от центра.
+  circlePath(fx - dir * rx * 0.26, fy - ry * 0.20, ry * 0.20);
   fillStroke(PALETTE.leafDot, Math.max(3, L.line * 0.7));
 }
 
@@ -935,17 +1007,25 @@ function drawZone(p) {
     const cx = L.zw / 2;
     const slide = easeOut(p.trunkAnim) * L.segH;
     const count = Math.min(p.segments.length, L.visible + 1);
+    // Дуги веток — до ствола: его обводка перекроет стык у основания.
+    for (let i = count - 1; i >= 0; i--) {
+      if (p.segments[i].branch === NONE) continue;
+      const cy = segY(i, slide);
+      if (cy - L.segH > L.zh) continue;
+      drawBranchArm(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
+    }
+
     const topY = L.baseY - count * L.segH - slide;
     drawTrunk(cx, topY, L.baseY, L.trunkW);
 
-    // Ветки поверх ствола, каждая на своём сегменте. Нижнюю оставляем
-    // напоследок: крупный персонаж иначе закрывает именно ту ветку,
-    // по которой игрок решает, куда бить.
+    // Кроны веток поверх ствола. Нижнюю оставляем напоследок: крупный
+    // персонаж иначе закрывает именно ту ветку, по которой игрок решает,
+    // куда бить.
     for (let i = count - 1; i >= 1; i--) {
       if (p.segments[i].branch === NONE) continue;
-      const cy = L.baseY - L.segH / 2 - i * L.segH - slide;
+      const cy = segY(i, slide);
       if (cy - L.segH > L.zh) continue;
-      drawBranch(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
+      drawBranchCrown(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
     }
 
     // Персонаж вплотную к стволу; на промахе его отбрасывает от ствола
@@ -957,10 +1037,9 @@ function drawZone(p) {
     const charX = cx + away * (L.trunkW * 0.5 + L.charH * 0.16 + knock);
     drawLumberjack(charX, L.baseY, p.side, p.chop, p.stun);
 
-    // Решающая нижняя ветка — поверх всего.
+    // Крона решающей нижней ветки — поверх всего.
     if (p.segments[0].branch !== NONE) {
-      drawBranch(cx, L.baseY - L.segH / 2 - slide,
-                 p.segments[0].branch, L.trunkW, L.segH);
+      drawBranchCrown(cx, segY(0, slide), p.segments[0].branch, L.trunkW, L.segH);
     }
 
     drawParticles(p);
@@ -998,6 +1077,9 @@ function drawZone(p) {
 }
 
 function easeOut(t) { return t * t; }   // твин ствола: быстрый старт, мягкий стоп
+
+/** Центр сегмента i по вертикали с учётом твина опускания. */
+function segY(i, slide) { return L.baseY - L.segH / 2 - i * L.segH - slide; }
 
 function drawDivider() {
   const t = L.line * 1.4;
