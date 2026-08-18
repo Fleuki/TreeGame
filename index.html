@@ -159,26 +159,34 @@ const CH_BOOT_H    = 0.06;
 const CH_ARM_TH    = 0.09;    // толщина руки
 const CH_ARM_FOLLOW= 0.35;    // насколько рука идёт за замахом топора
 const CH_SHOULDER  = { x: 0.10, y: 0.50 };   // плечо: от оси и над землёй
-const CH_HAND      = { x: 0.26, y: 0.45 };   // кисть в покое
+const CH_HAND      = { x: 0.32, y: 0.45 };   // кисть в позе удара
 const CH_RED_MIX   = 0.55;    // доля красного в заливках на промахе
 
 /* --- Топор: доли длины топора (сама длина — доля высоты персонажа) --- */
-const AXE_LEN        = 0.50;  // длина топора — доля высоты персонажа
+const AXE_LEN        = 0.56;  // длина топора — доля высоты персонажа
 const AXE_BUTT       = 0.20;  // хвост рукояти за кистью
 const AXE_HANDLE_TH  = 0.115;  // толщина рукояти
-const AXE_BLADE_L    = 0.42;  // длина лезвия вдоль топорища
-const AXE_BLADE_W    = 0.30;  // полувысота лезвия
-const AXE_BLADE_R    = 0.03;  // еле заметное скругление углов лезвия
+const AXE_BLADE_L    = 0.46;  // длина лезвия вдоль топорища
+const AXE_BLADE_BACK = 0.20;  // полувысота у обуха — узкая сторона
+const AXE_BLADE_EDGE = 0.50;  // вынос кромки в длинную сторону
+const AXE_BLADE_TOP  = 0.30;  // вынос кромки в короткую сторону
+const AXE_BEARD      = { x: 0.35, y: 0.60 };  // борода: длинная сторона уходит назад
+const AXE_EDGE_BULGE = 0.06;  // лёгкий выгиб режущей кромки наружу
+// Поза удара: топорище смотрит от зрителя в дерево, поэтому топор виден
+// сильно укороченным — почти горизонтальной чертой, лезвие уходит в ствол.
+const AXE_FORE_BACK  = 0.17;  // полувысота лезвия с торца у обуха
+const AXE_FORE_EDGE  = 0.05;  // полувысота у самой кромки, уже в стволе
+const AXE_FORE_L     = 0.48;  // какая доля укороченного топора — лезвие
 // На сколько лезвие входит в ствол в момент удара — доля высоты фигуры.
 // Из неё выводится, где стоит персонаж (см. charBox).
 const AXE_BITE       = 0.15;
+// От оси фигуры до поверхности ствола — доля высоты фигуры. Из этой величины
+// и AXE_BITE выводится длина топора в позе удара (см. strikeAxeLen).
+const CHAR_STAND     = 0.65;
 
-/* --- Анимация удара --- */
-const CHOP_WINDUP_T = 0.06;   // сек. замаха
-const CHOP_STRIKE_T = 0.05;   // сек. удара
-const CHOP_RETURN_T = 0.12;   // сек. возврата
-const AXE_IDLE_A    = -30 * DEG;   // топор на плече в покое
-const AXE_WINDUP_A  = -78 * DEG;   // угол замаха
+/* --- Удар: не анимация, а вторая поза --- */
+const CHOP_HOLD     = 0.13;   // сек. удержания позы удара
+const AXE_IDLE_A    = -90 * DEG;   // в покое топор поднят головой вверх
 // В момент контакта топорище смотрит ровно в ствол: лезвие входит в дерево
 // плашмя, а не бьёт рукоятью или углом.
 const AXE_STRIKE_A  =   0 * DEG;
@@ -189,9 +197,9 @@ const MISS_KNOCK_PX = 15;     // px отлёта от ствола
 const MISS_KNOCK_T  = 0.20;   // сек. отлёта и возврата
 const MISS_TILT_A   = 12 * DEG;    // наклон спрайта назад
 
-// Полная анимация удара и момент контакта лезвия со стволом.
-const CHOP_TIME  = CHOP_WINDUP_T + CHOP_STRIKE_T + CHOP_RETURN_T;
-const CHOP_HIT_T = CHOP_WINDUP_T + CHOP_STRIKE_T;
+// Поза удара включается разом, поэтому контакт — в тот же кадр, что и тап.
+const CHOP_TIME  = CHOP_HOLD;
+const CHOP_HIT_T = 0;
 const BRANCH_CHANCE= 0.35;    // вероятность ветки на новом сегменте
 const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
 const SAFE_START   = 3;       // первые сегменты — всегда без веток
@@ -984,24 +992,15 @@ function tinted(color) {
   return tintK > 0 ? mixColor(color, PALETTE.stunTint, tintK) : color;
 }
 
-/** Угол топора и наклон корпуса по таймеру удара. */
+/**
+ * Две позы, без промежуточной анимации: покой (топор закинут на плечо) и
+ * удар (топорище смотрит от зрителя в дерево). Поза переключается разом,
+ * поэтому удар читается мгновенно, как щелчок.
+ */
 function chopPose(chopT) {
-  if (chopT <= 0) return { axe: AXE_IDLE_A, lean: 0 };
-  const t = CHOP_TIME - chopT;                 // прошло с начала удара
-  if (t < CHOP_WINDUP_T) {                     // замах
-    const k = t / CHOP_WINDUP_T;
-    return { axe: AXE_IDLE_A + (AXE_WINDUP_A - AXE_IDLE_A) * k, lean: 0 };
-  }
-  if (t < CHOP_HIT_T) {                        // удар, easeOutQuad
-    const k = (t - CHOP_WINDUP_T) / CHOP_STRIKE_T;
-    const e = 1 - (1 - k) * (1 - k);
-    return { axe: AXE_WINDUP_A + (AXE_STRIKE_A - AXE_WINDUP_A) * e,
-             lean: BODY_LEAN_A * e };
-  }
-  const k = Math.min(1, (t - CHOP_HIT_T) / CHOP_RETURN_T);   // плавный возврат
-  const e = k * k * (3 - 2 * k);
-  return { axe: AXE_STRIKE_A + (AXE_IDLE_A - AXE_STRIKE_A) * e,
-           lean: BODY_LEAN_A * (1 - e) };
+  return chopT > 0
+    ? { axe: AXE_STRIKE_A, lean: BODY_LEAN_A, strike: true }
+    : { axe: AXE_IDLE_A,   lean: 0,           strike: false };
 }
 
 /** Отлёт персонажа от ствола на промахе: сразу назад и плавно обратно. */
@@ -1011,26 +1010,34 @@ function knockOffset(p) {
     : 0;
 }
 
-/** Вынос режущей кромки от кисти вдоль топорища. */
-function bladeReach(h) {
-  return h * AXE_LEN;
+/**
+ * Длина топора в позе удара. Топорище направлено от зрителя в ствол, поэтому
+ * видно его укороченным; длина берётся ровно такой, чтобы кромка зашла за
+ * поверхность ствола на AXE_BITE.
+ */
+function strikeAxeLen(h) {
+  return (CHAR_STAND + AXE_BITE - CH_HAND.x) * h;
+}
+
+/** Вынос режущей кромки от кисти вдоль топорища в текущей позе. */
+function bladeReach(h, pose) {
+  return pose.strike ? strikeAxeLen(h) : h * AXE_LEN;
 }
 
 /**
  * Локальная геометрия персонажа: где он стоит и какого размера.
- * Расстояние до ствола не задаётся отдельно, а выводится из длины топора:
- * в момент удара (AXE_STRIKE_A) кромка заходит за поверхность ствола
- * ровно на AXE_BITE — лезвие входит в дерево, рукоять остаётся снаружи.
+ * Расстояние до ствола — CHAR_STAND: столько, чтобы закинутый на плечо топор
+ * не задевал дерево. Длина топора в ударе считается из этого же расстояния,
+ * поэтому лезвие всегда входит в ствол ровно на AXE_BITE.
  */
 function charBox(p, cx) {
   const h = L.charH;
   const w = h * CH_W;
-  const reach = CH_HAND.x * h + bladeReach(h) * Math.cos(AXE_STRIKE_A);
   const away = p.side === LEFT ? -1 : 1;       // куда отлетать от ствола
   // Видимый край ствола — половина ширины плюс обводка: она лежит снаружи,
   // потому что ствол с ветками сперва обводится, а потом заливается.
   const surface = L.trunkW * 0.5 + L.line;
-  const x = cx + away * (surface + reach - h * AXE_BITE + knockOffset(p));
+  const x = cx + away * (surface + CHAR_STAND * h + knockOffset(p));
   return { w, h, x, away, dir: -away };        // dir: +1 — фигура смотрит вправо
 }
 
@@ -1047,21 +1054,53 @@ function handPoint(pose, h) {
 }
 
 /**
- * Топор в координатах кисти: рукоять уходит в −x (от ствола), лезвие —
- * в +x (к стволу). Фигура целиком зеркалится через scale(dir, 1), поэтому
- * на правой стороне лезвие так же смотрит в ствол, а рукоять — наружу.
+ * Топор сбоку — поза покоя. Рисуется в координатах кисти: рукоять уходит
+ * в −x (от ствола), голова — в +x. Голова несимметричная: у обуха узкая, к
+ * режущей кромке уходит длинным вылетом в одну сторону — так силуэт читается
+ * топором, а не молотком. Фигура целиком зеркалится через scale(dir, 1),
+ * поэтому на правой стороне лезвие так же смотрит в ствол.
  */
 function drawAxeShape(len, lw) {
   const th  = len * AXE_HANDLE_TH;
-  const bx0 = len * (1 - AXE_BLADE_L);         // где начинается лезвие
-  const bw  = len * AXE_BLADE_W;               // полувысота лезвия
+  const bx0 = len * (1 - AXE_BLADE_L);         // где начинается голова
+  const bk  = len * AXE_BLADE_BACK;            // узкая сторона, обух
+  const ed  = len * AXE_BLADE_EDGE;            // длинный вылет кромки
 
-  // Скруглённая рукоять: от хвоста за кистью до основания лезвия.
+  // Скруглённая рукоять: от хвоста за кистью до основания головы.
   roundRect(-len * AXE_BUTT, -th / 2, len * AXE_BUTT + bx0 + th, th, th / 2);
   fillStroke(PALETTE.axeHandle, lw);
 
-  // Лезвие — прямая колодка: так топор читается топором даже мелко на экране.
-  roundRect(bx0, -bw, len - bx0, bw * 2, len * AXE_BLADE_R);
+  // Профиль головы: узкий обух, длинная режущая кромка с лёгким выгибом и
+  // борода — длинная сторона уходит назад к рукояти.
+  ctx.beginPath();
+  ctx.moveTo(bx0, -bk);
+  ctx.lineTo(len, -len * AXE_BLADE_TOP);
+  ctx.quadraticCurveTo(len + len * AXE_EDGE_BULGE, ed * 0.3, len, ed);
+  ctx.lineTo(bx0 + (len - bx0) * AXE_BEARD.x, ed * AXE_BEARD.y);
+  ctx.lineTo(bx0,  bk);
+  ctx.closePath();
+  fillStroke(PALETTE.axeBlade, lw);
+}
+
+/**
+ * Топор в позе удара: топорище направлено от зрителя в дерево, поэтому видно
+ * его почти горизонтальной чертой, а голову — с торца, узким клином, кромка
+ * которого уже сидит в стволе.
+ */
+function drawAxeStrike(len, full, lw) {
+  const th  = full * AXE_HANDLE_TH;
+  const bx0 = len * (1 - AXE_FORE_L);
+
+  roundRect(-full * AXE_BUTT, -th / 2, full * AXE_BUTT + bx0 + th, th, th / 2);
+  fillStroke(PALETTE.axeHandle, lw);
+
+  const bk = full * AXE_FORE_BACK, ed = full * AXE_FORE_EDGE;
+  ctx.beginPath();
+  ctx.moveTo(bx0, -bk);
+  ctx.lineTo(len, -ed);
+  ctx.lineTo(len,  ed);
+  ctx.lineTo(bx0,  bk);
+  ctx.closePath();
   fillStroke(PALETTE.axeBlade, lw);
 }
 
@@ -1127,11 +1166,12 @@ function drawLumberjack(p, box) {
     ctx.fill();
   }
 
-  // Кисть и топор поверх фигуры: топор вращается вокруг кисти.
+  // Кисть и топор поверх фигуры: топор развёрнут по позе.
   ctx.save();
   ctx.translate(hand.x, hand.y);
   ctx.rotate(pose.axe);
-  drawAxeShape(h * AXE_LEN, lw);
+  if (pose.strike) drawAxeStrike(strikeAxeLen(h), h * AXE_LEN, lw);
+  else             drawAxeShape(h * AXE_LEN, lw);
   ctx.restore();
 
   circlePath(hand.x, hand.y, CH_ARM_TH * h * 0.62);
@@ -1148,7 +1188,7 @@ function bladePoint(p, cx) {
   const box  = charBox(p, cx);
   const pose = chopPose(p.chop);
   const hand = handPoint(pose, box.h);
-  const r    = bladeReach(box.h);
+  const r    = bladeReach(box.h, pose);
   const lx   = hand.x + r * Math.cos(pose.axe);
   const ly   = hand.y + r * Math.sin(pose.axe);
   return { x: box.x + box.dir * lx, y: L.baseY + ly };
