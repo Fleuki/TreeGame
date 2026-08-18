@@ -291,6 +291,11 @@ const BRANCH_CHANCE= 0.95;    // вероятность ветки на ново
 const BRANCH_GAP   = 1;       // сколько пустых сегментов между ветками
 const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
 const SAFE_START   = 2;       // первые сегменты — всегда без веток
+// Опасна не та ветка, в которой стоит персонаж, а та, что висит у него над
+// головой: после удара ствол опускается на сегмент, и она приходит ровно по
+// макушке. Поэтому проверяем сегмент HAZARD_SEG, а не нулевой — по нему же
+// целится бот и его же помечает крестик в подсказках.
+const HAZARD_SEG   = 1;       // ряд на высоте головы
 const MIN_TRUNK    = 14;      // минимум сегментов в памяти (дополняется под экран)
 const TUTORIAL_TIME = 3.0;    // сек. показа подсказок перед первым забегом
 const TUT_PULSE     = 6;      // рад/с пульсации кругов
@@ -744,8 +749,10 @@ function chopAttempt(p, side) {
   p.chop = CHOP_TIME;
 
   const bottom = p.segments[0];
-  if (bottom.branch === side) {
-    // Попал по ветке — промах: зона краснеет, персонажа отбрасывает.
+  const head   = p.segments[HAZARD_SEG];
+  if (head && head.branch === side) {
+    // Ветка над головой: шагнув на эту сторону, персонаж встретил бы её
+    // макушкой — зона краснеет, его отбрасывает.
     p.stun = STUN_TIME;
     p.shake = STUN_SHAKE_T; p.shakeDur = STUN_SHAKE_T; p.shakeMag = STUN_SHAKE;
     p.red = 1;
@@ -860,8 +867,9 @@ function spawnFlyingBranch(p, side) {
 
 function spawnLeaves(p, side) {
   const dir = side === LEFT ? -1 : 1;
-  const x = L.zw / 2 + dir * L.trunkW * 0.6;
-  const y = L.baseY - L.segH * 0.6;
+  // Ветка пришлась по голове — листья сыплются от макушки, а не от комля.
+  const x = L.zw / 2 + dir * (L.trunkW / 2 + L.line + CHAR_STAND * L.charH);
+  const y = L.baseY - L.charH * 0.94;
   for (let i = 0; i < 10; i++) {
     p.particles.push({
       kind: 'chip',
@@ -944,7 +952,7 @@ function updateBot(p, dt) {
   if (p.botTimer > 0) return;
   p.botTimer = botInterval(p) * (0.85 + Math.random() * 0.3);
 
-  const branch = p.segments[0].branch;
+  const branch = (p.segments[HAZARD_SEG] || { branch: NONE }).branch;
   const safe = branch === LEFT ? RIGHT : (branch === RIGHT ? LEFT
               : (Math.random() < 0.5 ? LEFT : RIGHT));
 
@@ -1824,10 +1832,10 @@ function drawTutorial(p, cx, slide) {
     ctx.stroke();
   }
 
-  // Чего избегать: крестик на ближайшей снизу ветке. Первые сегменты всегда
-  // без веток (SAFE_START), поэтому ищем нижнюю из тех, что видно.
+  // Чего избегать: крестик на ближайшей опасной ветке — той, что придёт по
+  // голове (HAZARD_SEG и выше). Ниже неё ветки не опасны, метить их нельзя.
   let bi = -1;
-  for (let i = 0; i < p.segments.length; i++) {
+  for (let i = HAZARD_SEG; i < p.segments.length; i++) {
     const cy = segY(i, slide);
     if (p.segments[i].branch === NONE) continue;
     if (cy < 0 || !branchFitsZone(cy)) continue;
