@@ -44,12 +44,16 @@ const PALETTE = {
   zoneSkyLow:  '#c8f4f8',
   divider:     '#141210',
 
+  // Облака — атмосфера: бледные, без обводки, часть с зеленцой.
+  cloudPale:   '#f6fcff',
+  cloudGreen:  '#e9f6e0',
+
   ground:      '#5ec93c',
   groundDark:  '#46ab2a',
 
   // Ветка красится этим же цветом — отдельной константы у неё нет.
-  trunk:       '#a06a3e',
-  trunkHi:     '#c98f5c',   // светлые штрихи-блики по стволу
+  trunk:       '#8a5527',   // тёмный насыщенный ствол
+  trunkHi:     '#e3b483',   // светлая полоса по центру ствола
   trunkCap:    '#5ec93a',   // зелёная «шапка» на торцах ствола
 
   leaf:        '#5ec93a',
@@ -70,6 +74,7 @@ const PALETTE = {
 
   chip:        '#c9853d',
   chipDark:    '#8f5a26',
+  shard:       '#3a2210',   // крупные щепки — почти чёрное дерево
 
   text:        '#1d1a16',
   textDim:     '#5d6b63',
@@ -102,15 +107,10 @@ const DEG = Math.PI / 180;
 
 /* --- Ствол: блики и торцы (доли ширины/высоты ствола) --- */
 const TRUNK_ROUND   = 0.30;   // скругление углов — доля ширины ствола
-const TRUNK_HI_A    = 0.30;   // прозрачность светлых штрихов
-const TRUNK_HI_W    = 0.17;   // ширина штриха — доля ширины ствола
-// Редкие блики: x — смещение от оси (доля ширины), y — доля высоты ствола
-// сверху вниз, h — длина штриха (доля высоты ствола).
-const TRUNK_HILITES = [
-  { x: -0.22, y: 0.10, h: 0.15 },
-  { x:  0.21, y: 0.44, h: 0.11 },
-  { x: -0.13, y: 0.74, h: 0.13 }
-];
+// Вместо пятен-бликов — одна еле заметная светлая полоса по центру ствола
+// во всю его высоту: даёт объём и не спорит с ветками.
+const TRUNK_SHEEN_A = 0.15;   // прозрачность полосы
+const TRUNK_SHEEN_W = 0.30;   // ширина полосы — доля ширины ствола
 const TRUNK_CAP_H   = 0.34;   // высота «шапки»-среза на торце — доля ширины
 const TRUNK_CAP_IN  = 0.06;   // насколько шапка уже ствола — доля ширины
 // Основание у земли шире ствола — дерево «стоит», а не воткнуто.
@@ -120,15 +120,14 @@ const TRUNK_BASE_H  = 0.42;   // высота основания — доля ш
 // обводка. Прозрачность сделана подмешиванием неба, а не globalAlpha: облако
 // лежит прямо на небе, поэтому результат тот же, но два полупрозрачных слоя
 // (подложка обводки и белый ком) не накладываются друг на друга и не серят.
-const CLOUD_MIX     = 0.50;
-const CLOUD_LINE    = 2;      // px обводки облака, независимо от масштаба зоны
+const CLOUD_ALPHA   = 0.30;   // облака — атмосфера, а не объект
 
 /* --- Ветка: доли L.branchLen, L.leafR, L.trunkW, L.crownR* --- */
 const BR_BEND       = 0.62;   // вынос контрольной точки дуги вбок
 const BR_DIP        = 0.14;   // прогиб у ствола: сперва вниз, потом вверх
 const BR_RISE       = 0.44;   // подъём конца дуги
-const BR_W0         = 0.72;   // толщина у ствола — доля leafR
-const BR_W1         = 0.36;   // толщина на конце — доля leafR
+const BR_W0         = 0.54;   // толщина у ствола — доля leafR
+const BR_W1         = 0.27;   // толщина на конце — доля leafR
 const BR_FLARE      = 2.4;    // как быстро утолщение у ствола сходит на нет
 const BR_ROOT       = 0.15;   // корень ветки внутри ствола — доля ширины ствола
 const CROWN_OFF     = 0.45;   // вынос центра кроны за конец дуги — доля rx
@@ -165,9 +164,11 @@ const CH_LEG_H     = 0.19;
 const CH_BOOT_W    = 0.22;
 const CH_BOOT_H    = 0.09;
 const CH_ARM_TH    = 0.09;    // толщина руки
-const CH_ARM_FOLLOW= 0.35;    // насколько рука идёт за замахом топора
 const CH_SHOULDER  = { x: 0.10, y: 0.50 };   // плечо: от оси и над землёй
-const CH_HAND      = { x: 0.32, y: 0.45 };   // кисть в позе удара
+// Своя кисть на каждую позу: в покое рука согнута у плеча, в ударе вытянута
+// к стволу горизонтально — на высоте плеча, поэтому топор идёт прямо в дерево.
+const CH_HAND_IDLE   = { x: 0.24, y: 0.38 };
+const CH_HAND_STRIKE = { x: 0.40, y: 0.50 };
 const CH_RED_MIX   = 0.55;    // доля красного в заливках на промахе
 
 /* --- Топор: доли длины топора (сама длина — доля высоты персонажа) --- */
@@ -193,15 +194,35 @@ const AXE_FORE_L     = 0.48;  // какая доля укороченного т
 const AXE_BITE       = 0.15;
 // От оси фигуры до поверхности ствола — доля высоты фигуры. Из этой величины
 // и AXE_BITE выводится длина топора в позе удара (см. strikeAxeLen).
-const CHAR_STAND     = 0.65;
+const CHAR_STAND     = 0.62;
 
 /* --- Удар: не анимация, а вторая поза --- */
 const CHOP_HOLD     = 0.13;   // сек. удержания позы удара
-const AXE_IDLE_A    = -90 * DEG;   // в покое топор поднят головой вверх
+const AXE_IDLE_A    = -80 * DEG;   // в покое топор поднят головой вверх
 // В момент контакта топорище смотрит ровно в ствол: лезвие входит в дерево
 // плашмя, а не бьёт рукоятью или углом.
 const AXE_STRIKE_A  =   0 * DEG;
 const BODY_LEAN_A   =   6 * DEG;   // наклон корпуса вперёд на ударе
+
+/* --- Эффект удара: крупные клинья-щепки, линии скорости, мелкие крошки --- */
+const SHARD_COUNT   = 3;      // крупных клиньев за удар
+const SHARD_LIFE    = 0.40;   // сек. жизни клина
+const SHARD_SIZE    = 0.55;   // размер клина — доля длины топора
+const SHARD_SPIN    = 14;     // рад/с вращения
+const SHARD_VX      = 220;    // px/с наружу от ствола, плюс разброс
+const SHARD_VX_RND  = 200;
+const SHARD_VY      = -430;   // подброс: клинья уходят дугой поверх фигуры
+const SHARD_VY_RND  = 200;
+const SHARD_G       = 1700;   // px/с² — за SHARD_LIFE клин успевает уйти по дуге
+const SHARD_OUT     = 0.10;   // разнос точек вылета — доля длины топора
+const DASH_COUNT    = 3;      // белых линий скорости
+const DASH_LIFE     = 0.12;   // сек.
+const DASH_LEN      = 0.50;   // длина линии — доля длины топора
+const DASH_TILT     = 25 * DEG;   // веер наклонён вверх от горизонтали
+const DASH_SPREAD   = 35 * DEG;   // полураствор веера
+const DASH_SPEED    = 620;    // px/с разлёта
+const DASH_W        = 0.07;   // толщина линии — доля её длины
+const CHIP_COUNT    = 8;      // мелкие крошки — дополнение
 
 /* --- Промах --- */
 const MISS_KNOCK_PX = 15;     // px отлёта от ствола
@@ -211,7 +232,7 @@ const MISS_TILT_A   = 12 * DEG;    // наклон спрайта назад
 // Поза удара включается разом, поэтому контакт — в тот же кадр, что и тап.
 const CHOP_TIME  = CHOP_HOLD;
 const CHOP_HIT_T = 0;
-const BRANCH_CHANCE= 0.35;    // вероятность ветки на новом сегменте
+const BRANCH_CHANCE= 0.65;    // вероятность ветки на новом сегменте
 const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
 const SAFE_START   = 3;       // первые сегменты — всегда без веток
 const MIN_TRUNK    = 14;      // минимум сегментов в памяти (дополняется под экран)
@@ -430,7 +451,7 @@ function computeLayout() {
   // Крона приплюснута: по высоте она должна укладываться в один сегмент,
   // иначе кроны соседних веток слипаются и не видно, где какая.
   let branchLen = segH * 1.00;
-  let leafR     = segH * 0.52;
+  let leafR     = segH * 0.45;
   const maxReach = zw * 0.47 - trunkW / 2;
   // 2.38 = вынос центра кроны (0.45) плюс её полуширина с гребнем волны,
   // всё в долях leafR.
@@ -624,12 +645,55 @@ function chopAttempt(p, side) {
   }
 }
 
+/**
+ * Эффект удара. Главное в нём — крупные тёмные клинья: они вылетают из точки
+ * контакта, кувыркаются и уходят по дуге. Следом — короткие белые линии
+ * скорости веером от той же точки, и уже как приправа — мелкие крошки.
+ */
 function spawnChips(p, side) {
   const dir = side === LEFT ? -1 : 1;          // наружу от ствола, в сторону удара
   const pt = bladePoint(p, L.zw / 2);          // из точки касания лезвия со стволом
   const x = pt.x, y = pt.y;
-  for (let i = 0; i < 12; i++) {
+  const axe = L.charH * AXE_LEN;
+
+  // Крупные клинья — размером примерно в половину топора.
+  for (let i = 0; i < SHARD_COUNT; i++) {
+    const off = (i / (SHARD_COUNT - 1) - 0.5) * 2 * axe * SHARD_OUT;
     p.particles.push({
+      kind: 'shard',
+      x: x + dir * Math.abs(off), y: y + off,
+      vx: dir * (SHARD_VX + Math.random() * SHARD_VX_RND),
+      vy: SHARD_VY + Math.random() * SHARD_VY_RND,
+      g: SHARD_G,
+      life: SHARD_LIFE, max: SHARD_LIFE,
+      size: axe * SHARD_SIZE * (0.8 + Math.random() * 0.4),
+      rot: Math.random() * 6.28,
+      spin: (Math.random() - 0.5) * 2 * SHARD_SPIN,
+      color: PALETTE.shard
+    });
+  }
+
+  // Линии скорости: веер наружу и вверх, живут один миг.
+  for (let i = 0; i < DASH_COUNT; i++) {
+    // t — угол над горизонталью, чтобы веер одинаково работал на обе стороны.
+    const t = DASH_TILT + (i / (DASH_COUNT - 1) - 0.5) * 2 * DASH_SPREAD;
+    const vx = dir * Math.cos(t) * DASH_SPEED, vy = -Math.sin(t) * DASH_SPEED;
+    p.particles.push({
+      kind: 'dash',
+      x, y,
+      vx, vy,
+      g: 0,
+      life: DASH_LIFE, max: DASH_LIFE,
+      size: axe * DASH_LEN,
+      rot: Math.atan2(vy, vx), spin: 0,
+      color: PALETTE.white
+    });
+  }
+
+  // Мелкие крошки.
+  for (let i = 0; i < CHIP_COUNT; i++) {
+    p.particles.push({
+      kind: 'chip',
       x, y,
       vx: dir * (60 + Math.random() * 220) + (Math.random() - 0.5) * 80,
       vy: -(120 + Math.random() * 220),
@@ -650,6 +714,7 @@ function spawnLeaves(p, side) {
   const y = L.baseY - L.segH * 0.6;
   for (let i = 0; i < 10; i++) {
     p.particles.push({
+      kind: 'chip',
       x, y,
       vx: dir * (30 + Math.random() * 140),
       vy: -(60 + Math.random() * 180),
@@ -793,16 +858,22 @@ function drawBackground() {
 
 // Облака: доля ширины зоны по x, доля высоты неба по y, радиус и скорость.
 const CLOUDS = [
-  { x: 0.16, y: 0.14, r: 0.060, sp: 0.009 },
-  { x: 0.70, y: 0.30, r: 0.043, sp: 0.014 },
-  { x: 0.38, y: 0.52, r: 0.069, sp: 0.006 },
-  { x: 0.88, y: 0.68, r: 0.036, sp: 0.017 }
+  { x: 0.16, y: 0.14, r: 0.060, sp: 0.009, green: false },
+  { x: 0.70, y: 0.30, r: 0.043, sp: 0.014, green: true  },
+  { x: 0.38, y: 0.52, r: 0.069, sp: 0.006, green: false },
+  { x: 0.88, y: 0.68, r: 0.036, sp: 0.017, green: true  }
 ];
 
-/** Медленно плывущие облака в небе зоны, позади дерева. */
+/**
+ * Облака: без обводки и полупрозрачные — они читаются как атмосфера, а не как
+ * игровой объект. Комья одного облака заливаются одним путём и одной
+ * заливкой: при globalAlpha отдельные заливки дали бы видимые швы на
+ * перекрытиях.
+ */
 function drawClouds(p) {
   const phase = p.index * 0.37;                  // зоны не зеркалят друг друга
-  const lw = CLOUD_LINE;
+  ctx.save();
+  ctx.globalAlpha = CLOUD_ALPHA;
   for (const c of CLOUDS) {
     // Проезжают всю зону и с запасом уходят за края, без «выскакивания».
     const fx = (c.x + phase + clock * c.sp) % 1.4;
@@ -815,16 +886,15 @@ function drawClouds(p) {
       [ r * 0.74,  r * 0.20, r * 0.58],
       [-r * 0.08, -r * 0.44, r * 0.62]
     ];
-    // Лёгкая прозрачность сделана цветом, а не globalAlpha: два полупрозрачных
-    // слоя (подложка обводки и белый ком) наложились бы друг на друга и облако
-    // посерело бы. Вместо этого в оба цвета подмешивается небо на высоте облака.
-    const sky = mixColor(PALETTE.zoneSkyTop, PALETTE.zoneSkyLow,
-                         Math.max(0, Math.min(1, y / L.baseY)));
-    ctx.fillStyle = mixColor(PALETTE.outline, sky, CLOUD_MIX);
-    for (const q of puffs) { circlePath(x + q[0], y + q[1], q[2] + lw); ctx.fill(); }
-    ctx.fillStyle = mixColor(PALETTE.white, sky, CLOUD_MIX);
-    for (const q of puffs) { circlePath(x + q[0], y + q[1], q[2]); ctx.fill(); }
+    ctx.fillStyle = c.green ? PALETTE.cloudGreen : PALETTE.cloudPale;
+    ctx.beginPath();
+    for (const q of puffs) {
+      ctx.moveTo(x + q[0] + q[2], y + q[1]);
+      ctx.arc(x + q[0], y + q[1], q[2], 0, 6.2832);
+    }
+    ctx.fill();
   }
+  ctx.restore();
 }
 
 function drawGround() {
@@ -862,17 +932,14 @@ function drawTrunk(cx, topY, botY, w, arms) {
   for (const a of arms) { taperedArcPath(a.arc, a.w0, a.w1); ctx.fill(); }
   trunkPath(cx, topY, botY, w); ctx.fill();
 
-  // Штрихи-блики: мягкие скруглённые пятна светлее ствола, вразброс.
+  // Светлая полоса по центру во всю высоту — лёгкий объём, не текстура.
   ctx.save();
-  ctx.clip();                                  // не вылезают за контур ствола
-  ctx.globalAlpha = TRUNK_HI_A;
+  ctx.clip();                                  // не вылезает за контур ствола
+  ctx.globalAlpha = TRUNK_SHEEN_A;
   ctx.fillStyle = PALETTE.trunkHi;
-  const hw = w * TRUNK_HI_W;
-  for (const s of TRUNK_HILITES) {
-    const hh = Math.max(hw, h * s.h);
-    roundRect(cx + s.x * w - hw / 2, topY + s.y * h, hw, hh, hw / 2);
-    ctx.fill();
-  }
+  const sw = w * TRUNK_SHEEN_W;
+  roundRect(cx - sw / 2, topY, sw, h, sw / 2);
+  ctx.fill();
   ctx.restore();
 
   // Торцы: сверху срез вровень со стволом, снизу — основание шире ствола.
@@ -1027,7 +1094,7 @@ function knockOffset(p) {
  * поверхность ствола на AXE_BITE.
  */
 function strikeAxeLen(h) {
-  return (CHAR_STAND + AXE_BITE - CH_HAND.x) * h;
+  return (CHAR_STAND + AXE_BITE - CH_HAND_STRIKE.x) * h;
 }
 
 /** Вынос режущей кромки от кисти вдоль топорища в текущей позе. */
@@ -1054,14 +1121,13 @@ function charBox(p, cx) {
 
 /**
  * Кисть в локальных координатах фигуры (ось у ног, +x — в сторону ствола).
- * Рука частично идёт за замахом: кисть поворачивается вокруг плеча на
- * CH_ARM_FOLLOW от угла топора.
+ * У каждой позы своя: в ударе рука вытянута к стволу на высоте плеча,
+ * в покое согнута и держит топор у плеча.
  */
 function handPoint(pose, h) {
-  const sx = CH_SHOULDER.x * h, sy = -CH_SHOULDER.y * h;
-  const dx = CH_HAND.x * h - sx, dy = -CH_HAND.y * h - sy;
-  const a = pose.axe * CH_ARM_FOLLOW, c = Math.cos(a), sn = Math.sin(a);
-  return { x: sx + dx * c - dy * sn, y: sy + dx * sn + dy * c, sx, sy };
+  const p = pose.strike ? CH_HAND_STRIKE : CH_HAND_IDLE;
+  return { x: p.x * h, y: -p.y * h,
+           sx: CH_SHOULDER.x * h, sy: -CH_SHOULDER.y * h };
 }
 
 /**
@@ -1237,6 +1303,10 @@ function drawStunMark(x, topY, h, stunT) {
   ctx.restore();
 }
 
+/**
+ * Частицы трёх видов: крупный клин-щепка (тёмный треугольник с обводкой),
+ * линия скорости (короткий белый штрих) и мелкая крошка-квадратик.
+ */
 function drawParticles(p) {
   for (const q of p.particles) {
     const a = Math.min(1, q.life / (q.max * 0.5));
@@ -1244,8 +1314,28 @@ function drawParticles(p) {
     ctx.globalAlpha = a;
     ctx.translate(q.x, q.y);
     ctx.rotate(q.rot);
-    ctx.fillStyle = q.color;
-    ctx.fillRect(-q.size / 2, -q.size / 2, q.size, q.size * 0.7);
+
+    if (q.kind === 'shard') {
+      const s = q.size;
+      ctx.beginPath();
+      ctx.moveTo( s * 0.55,  0);
+      ctx.lineTo(-s * 0.45, -s * 0.34);
+      ctx.lineTo(-s * 0.30,  s * 0.40);
+      ctx.closePath();
+      fillStroke(q.color, Math.max(2, L.line * 0.7));
+    } else if (q.kind === 'dash') {
+      ctx.strokeStyle = q.color;
+      ctx.lineWidth = Math.max(2, q.size * DASH_W);
+      ctx.lineCap = 'round';
+      // Штрих тянется от точки удара наружу, а не в обе стороны от неё.
+      ctx.beginPath();
+      ctx.moveTo(-q.size * 0.12, 0);
+      ctx.lineTo( q.size * 0.88, 0);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = q.color;
+      ctx.fillRect(-q.size / 2, -q.size / 2, q.size, q.size * 0.7);
+    }
     ctx.restore();
   }
 }
