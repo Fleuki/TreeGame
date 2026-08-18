@@ -154,12 +154,13 @@ const CH_HEAD_R    = 0.21;    // крупная круглая голова
 const CH_HEAD_Y    = 0.72;    // центр головы над землёй
 const CH_HEAD_DX   = 0.03;    // голова чуть подана вперёд
 const CH_BROW_A    = 0.60;    // шапка сдвинута вверх — доля радиуса головы
-// Борода растёт только со стороны лица: от уровня уха вниз и вперёд к
-// подбородку. Углы — по окружности головы, 0 — лицо, π/2 — низ.
-const CH_BEARD_A0  = -0.18;   // начало у скулы, доля π
-const CH_BEARD_A1  =  0.92;   // конец у уха, доля π
-const CH_BEARD_T   = 0.72;    // толщина бороды — доля радиуса головы
-const CH_BEARD_IN  = 0.10;    // насколько борода заходит на лицо
+// Борода — только со стороны лица: от уровня уха (середина высоты головы)
+// вниз и вперёд к подбородку. Углы по окружности головы: 0 — лицо, π/2 — низ.
+const CH_BEARD_A0  = 0.06;    // верх бороды у скулы, доля π
+const CH_BEARD_A1  = 0.66;    // низ, уже за подбородком — срежется клипом
+const CH_BEARD_T   = 0.30;   // (25–30% радиуса головы)    // вылет наружу — доля радиуса головы
+const CH_BEARD_IN  = 0.45;   // внутрь борода заходит на лицо глубже    // насколько внутренний край заходит на лицо
+const CH_BEARD_TIP = 0.45;    // доля толщины у верхнего конца — борода сходит на нет
 const CH_EYE_R     = 0.032;
 const CH_EYE       = { x: 0.10, y: -0.04 };  // глаз от центра головы
 const CH_BODY_W    = 0.46;    // короткое плотное тело
@@ -224,6 +225,10 @@ const AXE_BITE       = 0.15;
 // От оси фигуры до поверхности ствола — доля высоты фигуры. Из этой величины
 // и AXE_BITE выводится длина топора в позе удара (см. strikeAxeLen).
 const CHAR_STAND     = 0.78;
+// Ствол «размечен» на сегменты не от земли, а с высоты пенька: нижний
+// сегмент начинается выше головы персонажа, поэтому его ветка не может
+// пересечься с фигурой. Доля высоты персонажа.
+const TRUNK_LIFT     = 1.06;
 
 /* --- Удар: не анимация, а вторая поза --- */
 const CHOP_HOLD     = 0.13;   // сек. удержания позы удара
@@ -527,9 +532,11 @@ function computeLayout() {
     crownRy: leafR * 1.02,
     // Персонаж: высота — доля высоты зоны (см. CHAR_H).
     charH: zh * CHAR_H,
+    // Верх пенька: отсюда начинается нижний сегмент ствола.
+    stumpY: baseY - zh * CHAR_H * TRUNK_LIFT,
     scoreSize,
     nameSize: Math.max(11, Math.round(scoreSize * 0.38)),
-    visible: Math.ceil(baseY / segH) + 1
+    visible: Math.ceil((baseY - zh * CHAR_H * TRUNK_LIFT) / segH) + 1
   };
   if (players) for (const p of players) if (p.segments.length) ensureTrunk(p);
 }
@@ -763,7 +770,7 @@ function spawnChips(p, side) {
  */
 function spawnFlyingBranch(p, side) {
   const dir = side === LEFT ? -1 : 1;
-  const cx  = L.zw / 2, cy = branchDrawY(0, 0);
+  const cx  = L.zw / 2, cy = segY(0, 0);
   const c   = crownCenter(cx, cy, side, L.trunkW);
   p.particles.push({
     kind: 'branch', side,
@@ -1451,20 +1458,30 @@ function drawHead(p, h, lw) {
 }
 
 /**
- * Борода — полумесяц по скуле и подбородку, только со стороны лица: внутренний
- * край лежит на окружности головы, внешний отходит от неё волной и сходит на
- * нет у концов. Затылок остаётся чистым — там шапка. Сторона отдельно не
- * задаётся: фигура целиком зеркалится через scale(dir, 1) вместе с лицом.
+ * Борода — полоса по скуле и подбородку, растущая только со стороны лица:
+ * внутренний край прилегает к окружности головы, внешний идёт волной и
+ * выступает наружу на CH_BEARD_T радиуса. Сзади бороды нет вообще — всё, что
+ * заходит за вертикальную ось головы в сторону затылка, срезается клипом.
+ * Сторона отдельно не задаётся: фигура зеркалится вместе с лицом.
  */
 function drawBeard(hx, hy, hr, lw) {
-  const N = 28;
+  ctx.save();
+  // Полуплоскость со стороны лица: за осью головы борода не рисуется.
+  ctx.beginPath();
+  ctx.rect(hx, hy - hr * 2, hr * 3, hr * 4);
+  ctx.clip();
+
+  const N = 26;
   const a0 = CH_BEARD_A0 * Math.PI, a1 = CH_BEARD_A1 * Math.PI;
   const inner = [], outer = [];
   for (let i = 0; i <= N; i++) {
     const u = i / N, a = a0 + (a1 - a0) * u;
     const ca = Math.cos(a), sa = Math.sin(a);
-    // Толщина максимальна у подбородка и сходит на нет у концов.
-    const t = Math.pow(Math.sin(Math.PI * u), 0.7) * CH_BEARD_T
+    // Борода сужается к обоим концам: у скулы — чтобы не торчала обрубком,
+    // у затылка — чтобы срез клипом был почти не виден.
+    const grow = CH_BEARD_TIP + (1 - CH_BEARD_TIP)
+               * Math.min(1, u / 0.45) * Math.min(1, (1 - u) / 0.22);
+    const t = CH_BEARD_T * grow
               * (1 + CH_BEARD_WAVE * Math.sin(CH_BEARD_LOBES * 2 * Math.PI * u));
     inner.push([hx + ca * hr * (1 - CH_BEARD_IN), hy + sa * hr * (1 - CH_BEARD_IN)]);
     outer.push([hx + ca * hr * (1 + t),           hy + sa * hr * (1 + t)]);
@@ -1474,7 +1491,8 @@ function drawBeard(hx, hy, hr, lw) {
   for (let i = 1; i <= N; i++) ctx.lineTo(inner[i][0], inner[i][1]);
   for (let i = N; i >= 0; i--) ctx.lineTo(outer[i][0], outer[i][1]);
   ctx.closePath();
-  fillStroke(PALETTE.beard, Math.max(2, lw * 0.8));
+  fillStroke(PALETTE.beard, Math.max(2, lw * 0.7));
+  ctx.restore();
 }
 
 /**
@@ -1648,26 +1666,22 @@ function drawZone(p) {
     const count = Math.min(p.segments.length, L.visible + 1);
     // Дуги веток собираются заранее: ствол рисует их вместе с собой, одной
     // фигурой с общей обводкой — иначе на стыке была бы чёрная черта.
-    // Ветка сегмента i рисуется на сегмент выше (branchDrawY): у земли, где
-    // стоит персонаж, ствол всегда чистый, а опасная ветка нижнего сегмента
-    // видна над головой и ничего не загораживает. Логика не меняется —
-    // смертельной по-прежнему остаётся ветка segments[0].
     const arms = [];
-    for (let i = count - 2; i >= 0; i--) {
+    for (let i = count - 1; i >= 0; i--) {
       if (p.segments[i].branch === NONE) continue;
-      const cy = branchDrawY(i, slide);
+      const cy = segY(i, slide);
       if (cy - L.segH > L.zh || !branchFitsZone(cy)) continue;
       arms.push(branchArm(cx, cy, p.segments[i].branch, L.trunkW));
     }
 
-    const topY = L.baseY - count * L.segH - slide;
+    const topY = L.stumpY - count * L.segH - slide;
     drawTrunk(cx, topY, L.baseY, L.trunkW, arms);
 
     // Кроны поверх ствола, персонаж — поверх крон: его не должно закрывать
     // ничем, он и его топор и есть то, за чем следит игрок.
-    for (let i = count - 2; i >= 0; i--) {
+    for (let i = count - 1; i >= 0; i--) {
       if (p.segments[i].branch === NONE) continue;
-      const cy = branchDrawY(i, slide);
+      const cy = segY(i, slide);
       if (cy - L.segH > L.zh || !branchFitsZone(cy)) continue;
       drawBranchCrown(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
     }
@@ -1725,14 +1739,14 @@ function drawTutorial(p, cx, slide) {
   // без веток (SAFE_START), поэтому ищем нижнюю из тех, что видно.
   let bi = -1;
   for (let i = 0; i < p.segments.length; i++) {
-    const cy = branchDrawY(i, slide);
+    const cy = segY(i, slide);
     if (p.segments[i].branch === NONE) continue;
     if (cy < 0 || !branchFitsZone(cy)) continue;
     bi = i; break;
   }
   if (bi >= 0) {
     const branch = p.segments[bi].branch;
-    const c = crownCenter(cx, branchDrawY(bi, slide), branch, L.trunkW);
+    const c = crownCenter(cx, segY(bi, slide), branch, L.trunkW);
     const d = L.crownRy * TUT_CROSS * (0.9 + 0.1 * pulse);
     ctx.lineCap = 'round';
     for (const pass of [0, 1]) {
@@ -1750,14 +1764,14 @@ function drawTutorial(p, cx, slide) {
 function easeOut(t) { return t * t; }   // твин ствола: быстрый старт, мягкий стоп
 
 /** Центр сегмента i по вертикали с учётом твина опускания. */
-function segY(i, slide) { return L.baseY - L.segH / 2 - i * L.segH - slide; }
-
 /**
- * Где рисуется ветка сегмента i — на сегмент выше самого сегмента. Так у
- * земли, где стоит персонаж, ствол всегда без веток: фигуру ничто не
- * перекрывает, а опасная ветка нижнего сегмента видна прямо над ней.
+ * Центр сегмента i по вертикали с учётом твина опускания. Отсчёт идёт не от
+ * земли, а от верха пенька (L.stumpY): нижний сегмент начинается выше головы
+ * персонажа, поэтому его ветка физически не пересекается с фигурой.
+ * Отрисовка ветки совпадает с логикой один в один — ветка сегмента i
+ * рисуется ровно на сегменте i.
  */
-function branchDrawY(i, slide) { return segY(i + 1, slide); }
+function segY(i, slide) { return L.stumpY - L.segH / 2 - i * L.segH - slide; }
 
 function drawDivider() {
   const t = L.line * 1.4;
