@@ -176,9 +176,13 @@ const CH_BOOT_H    = 0.09;
 const CH_ARM_TH    = 0.09;    // толщина руки
 const CH_SHOULDER  = { x: 0.10, y: 0.50 };   // плечо: от оси и над землёй
 // Своя кисть на каждую позу: в покое рука согнута у плеча, в ударе вытянута
-// к стволу горизонтально — на высоте плеча, поэтому топор идёт прямо в дерево.
+// вперёд к стволу. По высоте кисть в ударе не константа, а середина нижнего
+// сегмента (см. handPoint): лезвие должно попадать ровно в тот сегмент,
+// который исчезает, — только x задаётся здесь.
 const CH_HAND_IDLE   = { x: 0.24, y: 0.38 };
-const CH_HAND_STRIKE = { x: 0.40, y: 0.50 };
+const CH_HAND_STRIKE = { x: 0.40 };
+const CH_HAND_LO     = 0.18;  // ниже этой доли h кисть не опускается
+const CH_HAND_HI     = 0.55;  // и выше не поднимается
 const CH_RED_MIX   = 0.55;    // доля красного в заливках на промахе
 
 /* --- Детали фигуры: всё в долях высоты h, кроме покачивания в px --- */
@@ -227,10 +231,6 @@ const AXE_BITE       = 0.15;
 // От оси фигуры до поверхности ствола — доля высоты фигуры. Из этой величины
 // и AXE_BITE выводится длина топора в позе удара (см. strikeAxeLen).
 const CHAR_STAND     = 0.78;
-// Ствол «размечен» на сегменты не от земли, а с высоты пенька: нижний
-// сегмент начинается выше головы персонажа, поэтому его ветка не может
-// пересечься с фигурой. Доля высоты персонажа.
-const TRUNK_LIFT     = 1.06;
 
 /* --- Удар: не анимация, а вторая поза --- */
 const CHOP_HOLD     = 0.13;   // сек. удержания позы удара
@@ -492,6 +492,7 @@ function computeLayout() {
 
   const ground = Math.max(28, Math.min(zh * 0.13, 84));
   const baseY  = zh - ground;                      // линия земли внутри зоны
+  const charH  = zh * CHAR_H;                      // высота фигуры
   const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 6));
   // Панель счёта компактная — она вспомогательная, поле важнее.
   const scoreSize = Math.round(Math.min(zw * 0.22, zh * 0.13, 68) / 1.5);
@@ -533,12 +534,10 @@ function computeLayout() {
     crownRx: leafR * 1.35,
     crownRy: leafR * 1.02,
     // Персонаж: высота — доля высоты зоны (см. CHAR_H).
-    charH: zh * CHAR_H,
-    // Верх пенька: отсюда начинается нижний сегмент ствола.
-    stumpY: baseY - zh * CHAR_H * TRUNK_LIFT,
+    charH,
     scoreSize,
     nameSize: Math.max(11, Math.round(scoreSize * 0.38)),
-    visible: Math.ceil((baseY - zh * CHAR_H * TRUNK_LIFT) / segH) + 1
+    visible: Math.ceil(baseY / segH) + 1
   };
   if (players) for (const p of players) if (p.segments.length) ensureTrunk(p);
 }
@@ -1230,13 +1229,19 @@ function charBox(p, cx) {
 
 /**
  * Кисть в локальных координатах фигуры (ось у ног, +x — в сторону ствола).
- * У каждой позы своя: в ударе рука вытянута к стволу на высоте плеча,
- * в покое согнута и держит топор у плеча.
+ * В покое рука согнута и держит топор у плеча. В ударе она вытянута вперёд, а
+ * по высоте опущена ровно на середину нижнего сегмента — туда, куда придётся
+ * лезвие: топор бьёт в тот же сегмент, который исчезает, оттуда же летят
+ * щепки и там же нарисована его ветка. Границы CH_HAND_LO/HI держат руку в
+ * пределах фигуры на любой раскладке.
  */
 function handPoint(pose, h) {
-  const p = pose.strike ? CH_HAND_STRIKE : CH_HAND_IDLE;
-  return { x: p.x * h, y: -p.y * h,
-           sx: CH_SHOULDER.x * h, sy: -CH_SHOULDER.y * h };
+  const shoulder = { sx: CH_SHOULDER.x * h, sy: -CH_SHOULDER.y * h };
+  if (!pose.strike) {
+    return { x: CH_HAND_IDLE.x * h, y: -CH_HAND_IDLE.y * h, ...shoulder };
+  }
+  const y = Math.min(Math.max(L.segH / 2, h * CH_HAND_LO), h * CH_HAND_HI);
+  return { x: CH_HAND_STRIKE.x * h, y: -y, ...shoulder };
 }
 
 /**
@@ -1677,7 +1682,7 @@ function drawZone(p) {
       arms.push(branchArm(cx, cy, p.segments[i].branch, L.trunkW));
     }
 
-    const topY = L.stumpY - count * L.segH - slide;
+    const topY = L.baseY - count * L.segH - slide;
     drawTrunk(cx, topY, L.baseY, L.trunkW, arms);
 
     // Кроны поверх ствола, персонаж — поверх крон: его не должно закрывать
@@ -1768,13 +1773,12 @@ function easeOut(t) { return t * t; }   // твин ствола: быстрый
 
 /** Центр сегмента i по вертикали с учётом твина опускания. */
 /**
- * Центр сегмента i по вертикали с учётом твина опускания. Отсчёт идёт не от
- * земли, а от верха пенька (L.stumpY): нижний сегмент начинается выше головы
- * персонажа, поэтому его ветка физически не пересекается с фигурой.
- * Отрисовка ветки совпадает с логикой один в один — ветка сегмента i
- * рисуется ровно на сегменте i.
+ * Центр сегмента i по вертикали с учётом твина опускания. Нижний сегмент
+ * стоит на земле, а его середина приходится ровно на точку удара лезвия
+ * (см. segH в computeLayout): топор, щепки, исчезающий сегмент и его ветка —
+ * на одной высоте. Ветка сегмента i рисуется ровно на сегменте i.
  */
-function segY(i, slide) { return L.stumpY - L.segH / 2 - i * L.segH - slide; }
+function segY(i, slide) { return L.baseY - L.segH / 2 - i * L.segH - slide; }
 
 function drawDivider() {
   const t = L.line * 1.4;
