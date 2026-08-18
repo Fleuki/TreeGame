@@ -83,15 +83,40 @@ const PALETTE = {
    ========================================================================= */
 const WIN_SCORE    = 50;      // очков до победы
 const STUN_TIME    = 0.7;     // сек. ошеломления
-const CHOP_TIME    = 0.10;    // сек. анимации удара (2–3 кадра)
 const TRUNK_TWEEN  = 0.08;    // сек. плавного опускания ствола
 const SHAKE_TIME   = 0.12;    // сек. тряски зоны от удара
 const SHAKE_MAG    = 3.5;     // px тряски от удара
 const STUN_SHAKE_T = 0.30;    // сек. тряски от ошеломления
 const STUN_SHAKE   = 8.0;     // px тряски от ошеломления
 const RED_TIME     = 0.25;    // сек. красной заливки зоны на промахе
-const KNOCK_TIME   = 0.35;    // сек. отлёта персонажа назад и возврата
 const TAP_FLASH    = 0.10;    // сек. подсветки половины зоны под пальцем
+
+const DEG = Math.PI / 180;
+
+/* --- Спрайты персонажа: размеры и точки привязки (доли, не пиксели) --- */
+const SPRITE_H     = 0.22;    // высота персонажа — доля высоты зоны
+const SPRITE_GAP   = 0.25;    // отступ от ствола — доля ширины спрайта
+const AXE_LEN      = 0.62;    // длина топора — доля высоты персонажа
+const HAND_PT      = { x: 0.85, y: 0.53 };  // кисть на спрайте персонажа
+const AXE_PIVOT    = { x: 0.03, y: 0.28 };  // торец рукояти на спрайте топора
+const AXE_EDGE     = { x: 0.86, y: 0.80 };  // лезвие — отсюда летят щепки
+
+/* --- Анимация удара --- */
+const CHOP_WINDUP_T = 0.06;   // сек. замаха
+const CHOP_STRIKE_T = 0.05;   // сек. удара
+const CHOP_RETURN_T = 0.12;   // сек. возврата
+const AXE_WINDUP_A  = -45 * DEG;   // угол замаха
+const AXE_STRIKE_A  =  25 * DEG;   // угол в момент контакта
+const BODY_LEAN_A   =   6 * DEG;   // наклон корпуса вперёд на ударе
+
+/* --- Промах --- */
+const MISS_KNOCK_PX = 15;     // px отлёта от ствола
+const MISS_KNOCK_T  = 0.20;   // сек. отлёта и возврата
+const MISS_TILT_A   = 12 * DEG;    // наклон спрайта назад
+
+// Полная анимация удара и момент контакта лезвия со стволом.
+const CHOP_TIME  = CHOP_WINDUP_T + CHOP_STRIKE_T + CHOP_RETURN_T;
+const CHOP_HIT_T = CHOP_WINDUP_T + CHOP_STRIKE_T;
 const BRANCH_CHANCE= 0.35;    // вероятность ветки на новом сегменте
 const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
 const SAFE_START   = 3;       // первые сегменты — всегда без веток
@@ -145,12 +170,36 @@ function makePlayer(index, isBot) {
     knock: 0,            // отлёт персонажа назад на промахе
     tapFlash: 0,         // подсветка половины зоны под пальцем
     tapSide: LEFT,       // какую половину подсветить
+    sprite: index === 0 ? 'red' : 'blue',   // какой спрайт лесоруба
+    chipPending: false,  // щепки ждут момента контакта лезвия
     scorePop: 0,         // pop-анимация счётчика
     particles: [],
     botTimer: 0
   };
 }
 let players = [makePlayer(0, false), makePlayer(1, true)];
+
+
+/* =========================================================================
+   3b. СПРАЙТЫ — грузятся асинхронно. Пока их нет (или если файлы не
+   отдались), персонаж рисуется примитивами, игра не ломается.
+   ========================================================================= */
+const Sprites = (function () {
+  const src = {
+    red:  'assets/lumberjack-red.png',
+    blue: 'assets/lumberjack-blue.png',
+    axe:  'assets/axe.png'
+  };
+  const img = {};
+  for (const k in src) { img[k] = new Image(); img[k].src = src[k]; }
+
+  const done = im => im && im.complete && im.naturalWidth > 0;
+  return {
+    get: k => (done(img[k]) ? img[k] : null),
+    // Персонажа рисуем спрайтами только когда готовы и фигура, и топор.
+    ready: k => done(img[k]) && done(img.axe)
+  };
+})();
 
 
 /* =========================================================================
@@ -334,8 +383,8 @@ function computeLayout() {
     // друг на друга: у каждой своя обводка, и они читаются как две.
     crownRx: leafR * 1.35,
     crownRy: leafR * 1.02,
-    // Персонаж крупный: он главный на экране и должен быть заметнее веток.
-    charH: segH * 2.9,
+    // Персонаж: высота — доля высоты зоны (см. SPRITE_H).
+    charH: zh * SPRITE_H,
     scoreSize,
     nameSize: Math.max(11, Math.round(scoreSize * 0.38)),
     visible: Math.ceil(baseY / segH) + 1
@@ -479,7 +528,7 @@ function chopAttempt(p, side) {
     p.stun = STUN_TIME;
     p.shake = STUN_SHAKE_T; p.shakeDur = STUN_SHAKE_T; p.shakeMag = STUN_SHAKE;
     p.red = 1;
-    p.knock = KNOCK_TIME;
+    p.knock = MISS_KNOCK_T;
     spawnLeaves(p, side);
     Sound.stun();
     return;
@@ -493,7 +542,7 @@ function chopAttempt(p, side) {
   p.scorePop = 1;
   p.shake = SHAKE_TIME; p.shakeDur = SHAKE_TIME; p.shakeMag = SHAKE_MAG;
   p.flash = 1;
-  spawnChips(p, side);
+  p.chipPending = true;        // щепки полетят в момент контакта лезвия
   Sound.chop(p.score / WIN_SCORE);
 
   if (p.score >= WIN_SCORE) {
@@ -505,8 +554,8 @@ function chopAttempt(p, side) {
 
 function spawnChips(p, side) {
   const dir = side === LEFT ? -1 : 1;          // наружу от ствола, в сторону удара
-  const x = L.zw / 2 + dir * L.trunkW * 0.5;
-  const y = L.baseY - L.segH * 0.55;
+  const pt = bladePoint(p, L.zw / 2);          // из точки касания лезвия со стволом
+  const x = pt.x, y = pt.y;
   for (let i = 0; i < 12; i++) {
     p.particles.push({
       x, y,
@@ -561,6 +610,11 @@ function update(dt) {
 
   for (const p of players) {
     if (p.chop > 0)      p.chop = Math.max(0, p.chop - dt);
+    // Щепки — ровно в момент контакта лезвия со стволом.
+    if (p.chipPending && CHOP_TIME - p.chop >= CHOP_HIT_T) {
+      p.chipPending = false;
+      spawnChips(p, p.side);
+    }
     if (p.stun > 0)      p.stun = Math.max(0, p.stun - dt);
     if (p.shake > 0)     p.shake = Math.max(0, p.shake - dt);
     if (p.flash > 0)     p.flash = Math.max(0, p.flash - dt * 7);
@@ -811,11 +865,163 @@ function drawBranchCrown(cx, cy, side, w, h) {
   fillStroke(PALETTE.leafDot, Math.max(3, L.line * 0.7));
 }
 
+/* ---------- Персонаж: спрайт плюс отдельный спрайт топора ---------- */
+
+/** Угол топора и наклон корпуса по таймеру удара. */
+function chopPose(chopT) {
+  if (chopT <= 0) return { axe: 0, lean: 0 };
+  const t = CHOP_TIME - chopT;                 // прошло с начала удара
+  if (t < CHOP_WINDUP_T) {                     // замах
+    return { axe: AXE_WINDUP_A * (t / CHOP_WINDUP_T), lean: 0 };
+  }
+  if (t < CHOP_HIT_T) {                        // удар, easeOutQuad
+    const k = (t - CHOP_WINDUP_T) / CHOP_STRIKE_T;
+    const e = 1 - (1 - k) * (1 - k);
+    return { axe: AXE_WINDUP_A + (AXE_STRIKE_A - AXE_WINDUP_A) * e,
+             lean: BODY_LEAN_A * e };
+  }
+  const k = Math.min(1, (t - CHOP_HIT_T) / CHOP_RETURN_T);   // плавный возврат
+  const e = k * k * (3 - 2 * k);
+  return { axe: AXE_STRIKE_A * (1 - e), lean: BODY_LEAN_A * (1 - e) };
+}
+
+/** Отлёт персонажа от ствола на промахе: сразу назад и плавно обратно. */
+function knockOffset(p) {
+  return p.knock > 0
+    ? Math.pow(p.knock / MISS_KNOCK_T, 0.7) * MISS_KNOCK_PX
+    : 0;
+}
+
+/** Локальная геометрия персонажа: где он стоит и какого размера. */
+function charBox(p, cx) {
+  const im = Sprites.get(p.sprite);
+  const h  = L.charH;
+  const w  = im ? h * im.naturalWidth / im.naturalHeight : h * 0.65;
+  const away = p.side === LEFT ? -1 : 1;       // куда отлетать от ствола
+  const x = cx + away * (L.trunkW * 0.5 + w * SPRITE_GAP + knockOffset(p));
+  return { im, w, h, x, away, dir: -away };    // dir: +1 — спрайт смотрит вправо
+}
+
 /**
- * Лесоруб. (x, baseY) — точка опоры, side — с какой стороны ствола стоит,
+ * Рисует персонажа с топором в контекст g. Координаты — локальные для зоны,
+ * точка привязки — низ спрайта на уровне земли.
+ */
+function paintCharacter(g, p, box) {
+  const { im, w, h, x, dir } = box;
+  const pose = chopPose(p.chop);
+  const tilt = p.knock > 0 ? -MISS_TILT_A * (p.knock / MISS_KNOCK_T) : 0;
+  const wob  = p.stun > 0 ? Math.sin(clock * 38) * 0.05 : 0;
+
+  g.save();
+  g.translate(x, L.baseY);
+  g.scale(dir, 1);                    // правая сторона — зеркало
+  g.rotate(pose.lean + tilt + wob);   // поворот вокруг точки у ног
+
+  g.drawImage(im, -w / 2, -h, w, h);
+
+  // Топор поверх персонажа, вращается вокруг торца рукояти у кисти.
+  const axe = Sprites.get('axe');
+  const aw  = h * AXE_LEN;
+  const ah  = aw * axe.naturalHeight / axe.naturalWidth;
+  g.save();
+  g.translate(-w / 2 + HAND_PT.x * w, -h + HAND_PT.y * h);
+  g.rotate(pose.axe);
+  g.drawImage(axe, -AXE_PIVOT.x * aw, -AXE_PIVOT.y * ah, aw, ah);
+  g.restore();
+
+  g.restore();
+}
+
+/** Точка лезвия в координатах зоны — из неё летят щепки в момент контакта. */
+function bladePoint(p, cx) {
+  const box = charBox(p, cx);
+  const axe = Sprites.get('axe');
+  if (!box.im || !axe) return { x: cx, y: L.baseY - L.segH * 0.55 };
+
+  const { w, h, x, dir } = box;
+  const aw = h * AXE_LEN, ah = aw * axe.naturalHeight / axe.naturalWidth;
+  const ang = chopPose(p.chop).axe;
+  const dx = (AXE_EDGE.x - AXE_PIVOT.x) * aw;
+  const dy = (AXE_EDGE.y - AXE_PIVOT.y) * ah;
+  const c = Math.cos(ang), sn = Math.sin(ang);
+  const lx = -w / 2 + HAND_PT.x * w + dx * c - dy * sn;
+  const ly = -h + HAND_PT.y * h + dx * sn + dy * c;
+  return { x: x + dir * lx, y: L.baseY + ly };
+}
+
+// Отдельная поверхность для красной вспышки поверх спрайта: source-atop
+// на основном холсте закрасил бы и фон, поэтому красим персонажа отдельно.
+let fxCanvas = null, fxCtx = null;
+function fxSurface(w, h) {
+  if (!fxCanvas) {
+    fxCanvas = document.createElement('canvas');
+    fxCtx = fxCanvas.getContext('2d');
+  }
+  if (fxCanvas.width < w || fxCanvas.height < h) {
+    fxCanvas.width = Math.ceil(w); fxCanvas.height = Math.ceil(h);
+  }
+  fxCtx.setTransform(1, 0, 0, 1, 0, 0);
+  fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
+  return fxCtx;
+}
+
+/** Персонаж целиком: спрайт, топор, красная вспышка и значок ошеломления. */
+function drawCharacter(p, cx) {
+  const box = charBox(p, cx);
+
+  if (!box.im || !Sprites.ready(p.sprite)) {
+    // Спрайты ещё не загрузились или не отдались — рисуем примитивами.
+    drawLumberjackShapes(box.x, L.baseY, p.side, p.chop, p.stun);
+  } else if (p.red > 0) {
+    // Красим персонажа на отдельной поверхности размером с его коробку.
+    const aw = box.h * AXE_LEN;
+    const bx = box.x - box.w / 2 - aw, by = L.baseY - box.h - aw * 0.5;
+    const bw = box.w + aw * 2,        bh = box.h + aw * 0.5 + box.h * 0.1;
+    const g = fxSurface(bw * DPR, bh * DPR);
+    g.setTransform(DPR, 0, 0, DPR, -bx * DPR, -by * DPR);
+    paintCharacter(g, p, box);
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    g.globalAlpha = p.red * 0.6;
+    g.fillStyle = PALETTE.stunTint;
+    g.fillRect(0, 0, bw * DPR, bh * DPR);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    ctx.drawImage(fxCanvas, 0, 0, bw * DPR, bh * DPR, bx, by, bw, bh);
+  } else {
+    paintCharacter(ctx, p, box);
+  }
+
+  if (p.stun > 0) drawStunMark(box.x, L.baseY - box.h, box.h, p.stun);
+}
+
+/** Крутящиеся звёздочки и восклицательный знак над головой. */
+function drawStunMark(x, topY, h, stunT) {
+  const cy = topY - h * 0.18;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, stunT / 0.15);
+  for (let i = 0; i < 3; i++) {
+    const a = clock * 7 + i * 2.094;
+    circlePath(x + Math.cos(a) * h * 0.30, cy + Math.sin(a) * h * 0.10, h * 0.06);
+    fillStroke(PALETTE.accent, Math.max(3, L.line * 0.7));
+  }
+  ctx.fillStyle = PALETTE.danger;
+  ctx.strokeStyle = PALETTE.outline;
+  ctx.lineWidth = L.line;
+  ctx.lineJoin = 'round';
+  ctx.font = 'bold ' + Math.round(h * 0.42) + 'px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.strokeText('!', x, cy - h * 0.02);
+  ctx.fillText('!', x, cy - h * 0.02);
+  ctx.restore();
+}
+
+/**
+ * Запасная отрисовка примитивами — пока спрайты не загрузились.
+ * (x, baseY) — точка опоры, side — с какой стороны ствола стоит,
  * chopT — остаток анимации удара, stunT — остаток ошеломления.
  */
-function drawLumberjack(x, baseY, side, chopT, stunT) {
+function drawLumberjackShapes(x, baseY, side, chopT, stunT) {
   const h    = L.charH;
   const dir  = side === LEFT ? 1 : -1;     // куда смотрит (к стволу)
   const prog = chopT > 0 ? 1 - chopT / CHOP_TIME : 1;   // 0 — замах, 1 — удар
@@ -893,26 +1099,6 @@ function drawLumberjack(x, baseY, side, chopT, stunT) {
   ctx.restore(); // корпус
   ctx.restore(); // персонаж
 
-  // Значок ошеломления — крутящиеся звёздочки над головой.
-  if (stunT > 0) {
-    const cx = x, cy = baseY - h * 1.10;
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, stunT / 0.15);
-    for (let i = 0; i < 3; i++) {
-      const a = clock * 7 + i * 2.094;
-      circlePath(cx + Math.cos(a) * h * 0.24, cy + Math.sin(a) * h * 0.08, h * 0.045);
-      fillStroke(PALETTE.accent, Math.max(3, L.line * 0.7));
-    }
-    ctx.fillStyle = PALETTE.danger;
-    ctx.strokeStyle = PALETTE.outline;
-    ctx.lineWidth = L.line;
-    ctx.lineJoin = 'round';
-    ctx.font = 'bold ' + Math.round(h * 0.34) + 'px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.strokeText('!', cx, cy - h * 0.02);
-    ctx.fillText('!', cx, cy - h * 0.02);
-    ctx.restore();
-  }
 }
 
 function drawParticles(p) {
@@ -1028,14 +1214,7 @@ function drawZone(p) {
       drawBranchCrown(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
     }
 
-    // Персонаж вплотную к стволу; на промахе его отбрасывает от ствола
-    // и он возвращается обратно.
-    const away = p.side === LEFT ? -1 : 1;
-    const knock = p.knock > 0
-      ? Math.pow(p.knock / KNOCK_TIME, 0.7) * L.charH * 0.30
-      : 0;
-    const charX = cx + away * (L.trunkW * 0.5 + L.charH * 0.16 + knock);
-    drawLumberjack(charX, L.baseY, p.side, p.chop, p.stun);
+    drawCharacter(p, cx);
 
     // Крона решающей нижней ветки — поверх всего.
     if (p.segments[0].branch !== NONE) {
