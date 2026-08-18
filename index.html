@@ -224,19 +224,20 @@ const AXE_HEAD_BULGE = 0.07;  // выгиб кромки наружу
 // сильно укороченным — почти горизонтальной чертой, лезвие уходит в ствол.
 const AXE_FORE_BACK  = 0.17;  // полувысота лезвия с торца у обуха
 const AXE_FORE_EDGE  = 0.05;  // полувысота у самой кромки, уже в стволе
-const AXE_FORE_L     = 0.48;  // какая доля укороченного топора — лезвие
+const AXE_FORE_L     = 0.48;  // длина головы с торца — доля длины топора,
+                              // а не вылета: голова не растёт вместе с рукоятью
 // На сколько лезвие входит в ствол в момент удара — доля высоты фигуры.
 // Из неё выводится, где стоит персонаж (см. charBox).
 const AXE_BITE       = 0.15;
 // От оси фигуры до поверхности ствола — доля высоты фигуры. Из этой величины
 // и AXE_BITE выводится длина топора в позе удара (см. strikeAxeLen).
-const CHAR_STAND     = 0.78;
-// Нулевая ветка сидит на высоте удара, то есть на высоте фигуры. Чтобы её
-// крона не накрывала персонажа, эта ветка длиннее остальных — крона уходит
-// за фигуру. Если по ширине зоны такой вынос не влезает, ветка вместо этого
-// круче задирается вверх, и крона оказывается выше головы.
-const BR0_MARGIN     = 0.10;  // запас между фигурой и кроной — доля высоты фигуры
-const BR0_FIT        = 0.49;  // докуда крона может дотянуться — доля ширины зоны
+// Персонаж стоит дальше, чем достаёт крона ветки нижнего сегмента: та сидит
+// на высоте удара, то есть на высоте фигуры, и иначе накрывала бы её. Отсюда
+// зазор не задаётся числом, а считается из геометрии кроны (см. computeLayout),
+// а CHAR_STAND — только нижняя граница на случай очень узкой зоны.
+const CHAR_STAND     = 0.78;  // минимум — доля высоты фигуры
+const CHAR_CLEAR     = 0.10;  // запас между силуэтом и кроной — доля высоты фигуры
+const CH_SIDE        = 0.25;  // силуэт фигуры вбок от её оси — доля высоты
 
 /* --- Удар: не анимация, а вторая поза --- */
 const CHOP_HOLD     = 0.13;   // сек. удержания позы удара
@@ -525,20 +526,15 @@ function computeLayout() {
     leafR     *= k;
   }
 
-  // Нулевая ветка: длина, при которой внутренний край кроны оказывается за
-  // фигурой, и предел, докуда крона влезает в зону.
+  // Куда дотягивается крона от поверхности ствола: вынос дуги плюс полуширина
+  // кроны вместе со смещением её центра.
   const crownRx = leafR * 1.35, crownRy = leafR * 1.02;
-  const crownHalf = crownRx * 1.05;                     // полуширина кроны с волной
-  const margin  = charH * BR0_MARGIN;
-  const charOut = charH * (CHAR_STAND + CH_W / 2) + margin;   // от поверхности ствола
-  const wantLen = charOut + crownHalf - crownRx * CROWN_OFF;
-  const fitLen  = zw * BR0_FIT - trunkW / 2 - crownRx * CROWN_OFF - crownHalf;
-  const br0Len  = Math.max(branchLen, Math.min(wantLen, fitLen));
-  // Если вынести крону за фигуру не удалось — поднимаем её выше головы.
-  const overHead = charH * 0.94 + margin + crownRy * 0.90 - segH / 2;
-  const br0Rise = br0Len + 0.5 >= wantLen
-    ? br0Len * BR_RISE
-    : Math.max(br0Len * BR_RISE, overHead);
+  const crownOut = branchLen + crownRx * (CROWN_OFF + 1.05);
+  const side  = charH * CH_SIDE;                   // силуэт фигуры вбок
+  // Ось фигуры: за кроной, с запасом. Не дальше, чем позволяет зона.
+  const standMax = zw / 2 - (trunkW / 2 + line) - side;
+  const stand = Math.min(Math.max(crownOut + charH * CHAR_CLEAR + side,
+                                  charH * CHAR_STAND), standMax);
 
   L = {
     stacked,
@@ -553,7 +549,7 @@ function computeLayout() {
     // Крона — приплюснутый овал. Соседние кроны могут слегка находить
     // друг на друга: у каждой своя обводка, и они читаются как две.
     crownRx, crownRy,
-    br0Len, br0Rise,
+    stand,
     // Персонаж: высота — доля высоты зоны (см. CHAR_H).
     charH,
     scoreSize,
@@ -793,8 +789,7 @@ function spawnChips(p, side) {
 function spawnFlyingBranch(p, side) {
   const dir = side === LEFT ? -1 : 1;
   const cx  = L.zw / 2, cy = segY(0, 0);
-  const g   = branchGeom(0);
-  const c   = crownCenter(cx, cy, side, L.trunkW, g);
+  const c   = crownCenter(cx, cy, side, L.trunkW);
   p.particles.push({
     kind: 'branch', side,
     x: c.x, y: c.y,
@@ -802,7 +797,7 @@ function spawnFlyingBranch(p, side) {
     vy: FLY_VY + Math.random() * FLY_VY_RND,
     g: FLY_G,
     life: FLY_LIFE, max: FLY_LIFE,
-    size: L.trunkW, geom: g,
+    size: L.trunkW,
     rot: 0,
     spin: (Math.random() < 0.5 ? -1 : 1) * FLY_SPIN * (0.6 + Math.random() * 0.8),
     color: PALETTE.trunk
@@ -1072,36 +1067,24 @@ function trunkCap(cx, y, cw, ch) {
  */
 
 /**
- * Длина дуги и подъём конца для ветки сегмента i. У нулевого сегмента своя
- * геометрия: он на высоте фигуры, поэтому его крона выносится за персонажа
- * (или задирается выше головы) — см. computeLayout. Основание ветки при этом
- * остаётся на высоте удара.
- */
-function branchGeom(i) {
-  return i === 0
-    ? { len: L.br0Len,     rise: L.br0Rise }
-    : { len: L.branchLen,  rise: L.branchLen * BR_RISE };
-}
-
-/**
  * Влезает ли крона ветки в зону целиком. Ветку, которая пересекает верхнюю
  * границу, не рисуем вовсе: клип по зоне срезал бы её ровно по разделителю,
  * и на стыке две обрезанные кроны соседних зон слипались бы в одно пятно.
  */
-function branchFitsZone(cy, g) {
-  const top = cy - g.rise - L.crownRy * 1.15 - L.line * 2;
+function branchFitsZone(cy) {
+  const top = cy - L.branchLen * BR_RISE - L.crownRy * 1.15 - L.line * 2;
   return top > 0;
 }
 
 /** Центр кроны ветки — им пользуются и отрисовка, и подсказка-крестик. */
-function crownCenter(cx, cy, side, w, g) {
+function crownCenter(cx, cy, side, w) {
   const dir = side === LEFT ? -1 : 1;
-  const a = branchTip(cx, cy, dir, w, g);
+  const a = branchTip(cx, cy, dir, w);
   return { x: a.x1 + dir * L.crownRx * CROWN_OFF, y: a.y1 - L.crownRy * 0.15 };
 }
 
 /** Конец дуги ветки — точка, где сидит крона. */
-function branchTip(cx, cy, dir, w, g) {
+function branchTip(cx, cy, dir, w) {
   const edge = cx + dir * w / 2;               // край ствола
   return {
     // Дуга начинается внутри ствола: наружу выходит её середина, а стык
@@ -1110,8 +1093,8 @@ function branchTip(cx, cy, dir, w, g) {
     x0: cx + dir * w * BR_ROOT, y0: cy,
     // Контрольная точка ниже основания: ветка сперва слегка провисает,
     // потом уходит вбок и вверх — тот самый изгиб, а не прямая палка.
-    kx: edge + dir * g.len * BR_BEND, ky: cy + g.len * BR_DIP,
-    x1: edge + dir * g.len, y1: cy - g.rise
+    kx: edge + dir * L.branchLen * BR_BEND, ky: cy + L.branchLen * BR_DIP,
+    x1: edge + dir * L.branchLen, y1: cy - L.branchLen * BR_RISE
   };
 }
 
@@ -1149,17 +1132,17 @@ function taperedArcPath(a, w0, w1) {
  * Цвет — тот же, что у ствола (PALETTE.trunk).
  */
 /** Дуга ветки отдельной фигурой — для срубленной ветки в полёте. */
-function drawBranchArm(cx, cy, side, w, g) {
-  const a = branchArm(cx, cy, side, w, g);
+function drawBranchArm(cx, cy, side, w) {
+  const a = branchArm(cx, cy, side, w);
   setOutline(L.line * 2);
   taperedArcPath(a.arc, a.w0, a.w1); ctx.stroke();
   ctx.fillStyle = tinted(PALETTE.trunk);
   taperedArcPath(a.arc, a.w0, a.w1); ctx.fill();
 }
 
-function branchArm(cx, cy, side, w, g) {
+function branchArm(cx, cy, side, w) {
   return {
-    arc: branchTip(cx, cy, side === LEFT ? -1 : 1, w, g),
+    arc: branchTip(cx, cy, side === LEFT ? -1 : 1, w),
     w0:  L.leafR * BR_W0,                  // у ствола толще
     w1:  L.leafR * BR_W1                   // к концу тоньше
   };
@@ -1171,9 +1154,9 @@ function branchArm(cx, cy, side, w, g) {
  * без швов внутри, а край читается круглыми буграми. Сверху — жёлтый блик.
  * dir разворачивает раскладку долей, чтобы левые и правые кроны не были клонами.
  */
-function drawBranchCrown(cx, cy, side, w, h, g) {
+function drawBranchCrown(cx, cy, side, w, h) {
   const dir = side === LEFT ? -1 : 1;
-  const a   = branchTip(cx, cy, dir, w, g);
+  const a   = branchTip(cx, cy, dir, w);
   const rx  = L.crownRx, ry = L.crownRy;
   const fx  = a.x1 + dir * rx * CROWN_OFF;
   const fy  = a.y1 - ry * 0.15;
@@ -1236,7 +1219,7 @@ function knockOffset(p) {
  * поверхность ствола на AXE_BITE.
  */
 function strikeAxeLen(h) {
-  return (CHAR_STAND + AXE_BITE - CH_HAND_STRIKE.x) * h;
+  return L.stand + (AXE_BITE - CH_HAND_STRIKE.x) * h;
 }
 
 /** Вынос режущей кромки от кисти вдоль топорища в текущей позе. */
@@ -1246,9 +1229,10 @@ function bladeReach(h, pose) {
 
 /**
  * Локальная геометрия персонажа: где он стоит и какого размера.
- * Расстояние до ствола — CHAR_STAND: столько, чтобы закинутый на плечо топор
- * не задевал дерево. Длина топора в ударе считается из этого же расстояния,
- * поэтому лезвие всегда входит в ствол ровно на AXE_BITE.
+ * Расстояние до ствола — L.stand: столько, чтобы крона ветки нижнего сегмента
+ * не доставала до силуэта фигуры (см. computeLayout). Длина топора в ударе
+ * считается из этого же расстояния, поэтому лезвие всегда входит в ствол ровно
+ * на AXE_BITE, как далеко бы персонаж ни стоял.
  */
 function charBox(p, cx) {
   const h = L.charH;
@@ -1257,7 +1241,7 @@ function charBox(p, cx) {
   // Видимый край ствола — половина ширины плюс обводка: она лежит снаружи,
   // потому что ствол с ветками сперва обводится, а потом заливается.
   const surface = L.trunkW * 0.5 + L.line;
-  const x = cx + away * (surface + CHAR_STAND * h + knockOffset(p));
+  const x = cx + away * (surface + L.stand + knockOffset(p));
   return { w, h, x, away, dir: -away };        // dir: +1 — фигура смотрит вправо
 }
 
@@ -1314,7 +1298,9 @@ function drawAxeShape(len, lw) {
  */
 function drawAxeStrike(len, full, lw) {
   const th  = full * AXE_HANDLE_TH;
-  const bx0 = len * (1 - AXE_FORE_L);
+  // Голова — компактный клин на конце: её размер задан самим топором, иначе
+  // при большом вылете рукояти топор превращается в пику.
+  const bx0 = len - full * AXE_FORE_L;
 
   roundRect(-full * AXE_BUTT, -th / 2, full * AXE_BUTT + bx0 + th, th, th / 2);
   fillStroke(PALETTE.axeHandle, lw);
@@ -1598,10 +1584,10 @@ function drawParticles(p) {
     if (q.kind === 'branch') {
       // Ветка строится в координатах ствола, поэтому смещаем её так, чтобы
       // центр кроны оказался в точке частицы — вокруг него и вращаем.
-      const c = crownCenter(0, 0, q.side, q.size, q.geom);
+      const c = crownCenter(0, 0, q.side, q.size);
       ctx.translate(-c.x, -c.y);
-      drawBranchArm(0, 0, q.side, q.size, q.geom);
-      drawBranchCrown(0, 0, q.side, q.size, 0, q.geom);
+      drawBranchArm(0, 0, q.side, q.size);
+      drawBranchCrown(0, 0, q.side, q.size);
     } else if (q.kind === 'shard') {
       const s = q.size;
       ctx.beginPath();
@@ -1639,6 +1625,10 @@ function drawParticles(p) {
 function drawScore(p) {
   const m  = Math.max(12, L.zw * 0.045);
   const sz = L.scoreSize;
+  // Панель стоит у внешнего края, но не в самом углу: персонаж стоит далеко от
+  // ствола (см. L.stand) и занял бы оба угла попеременно. Отодвигаем панель
+  // внутрь — за силуэт фигуры, но не доводя до основания ствола.
+  const x = Math.max(m, L.zw / 2 - L.stand - CH_SIDE * L.charH + m);
 
   ctx.font = 'bold ' + sz + 'px system-ui, -apple-system, sans-serif';
   const tw = ctx.measureText(String(p.score)).width;
@@ -1653,13 +1643,13 @@ function drawScore(p) {
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.fillStyle = PALETTE.text;
   ctx.font = '700 ' + L.nameSize + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(p.name, m + L.line, y0);
+  ctx.fillText(p.name, x + L.line, y0);
 
   // Счёт — крупно на белой плашке: читается и поверх листвы.
   const py = y0 + L.nameSize * 1.3;
   const pop = 1 + p.scorePop * 0.22;
   ctx.save();
-  ctx.translate(m, py);
+  ctx.translate(x, py);
   ctx.scale(pop, pop);
   roundRect(0, 0, pw, ph, ph * 0.32);
   fillStroke(p.scorePop > 0.5 ? PALETTE.accent : PALETTE.white);
@@ -1671,11 +1661,11 @@ function drawScore(p) {
 
   // Полоска прогресса до WIN_SCORE
   const by = py + ph + bh * 1.1;
-  roundRect(m, by, pw, bh, bh / 2);
+  roundRect(x, by, pw, bh, bh / 2);
   fillStroke(PALETTE.white, Math.max(3, L.line * 0.55));
   const done = pw * Math.min(1, p.score / WIN_SCORE);
   if (done > bh) {
-    roundRect(m, by, done, bh, bh / 2);
+    roundRect(x, by, done, bh, bh / 2);
     fillStroke(PALETTE.accent, Math.max(3, L.line * 0.55));
   }
 }
@@ -1712,9 +1702,8 @@ function drawZone(p) {
     for (let i = count - 1; i >= 0; i--) {
       if (p.segments[i].branch === NONE) continue;
       const cy = segY(i, slide);
-      const g = branchGeom(i);
-      if (cy - L.segH > L.zh || !branchFitsZone(cy, g)) continue;
-      arms.push(branchArm(cx, cy, p.segments[i].branch, L.trunkW, g));
+      if (cy - L.segH > L.zh || !branchFitsZone(cy)) continue;
+      arms.push(branchArm(cx, cy, p.segments[i].branch, L.trunkW));
     }
 
     const topY = L.baseY - count * L.segH - slide;
@@ -1725,9 +1714,8 @@ function drawZone(p) {
     for (let i = count - 1; i >= 0; i--) {
       if (p.segments[i].branch === NONE) continue;
       const cy = segY(i, slide);
-      const g = branchGeom(i);
-      if (cy - L.segH > L.zh || !branchFitsZone(cy, g)) continue;
-      drawBranchCrown(cx, cy, p.segments[i].branch, L.trunkW, L.segH, g);
+      if (cy - L.segH > L.zh || !branchFitsZone(cy)) continue;
+      drawBranchCrown(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
     }
 
     drawCharacter(p, cx);
@@ -1785,12 +1773,12 @@ function drawTutorial(p, cx, slide) {
   for (let i = 0; i < p.segments.length; i++) {
     const cy = segY(i, slide);
     if (p.segments[i].branch === NONE) continue;
-    if (cy < 0 || !branchFitsZone(cy, branchGeom(i))) continue;
+    if (cy < 0 || !branchFitsZone(cy)) continue;
     bi = i; break;
   }
   if (bi >= 0) {
     const branch = p.segments[bi].branch;
-    const c = crownCenter(cx, segY(bi, slide), branch, L.trunkW, branchGeom(bi));
+    const c = crownCenter(cx, segY(bi, slide), branch, L.trunkW);
     const d = L.crownRy * TUT_CROSS * (0.9 + 0.1 * pulse);
     ctx.lineCap = 'round';
     for (const pass of [0, 1]) {
