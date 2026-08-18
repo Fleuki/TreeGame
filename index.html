@@ -154,13 +154,15 @@ const CH_HEAD_R    = 0.21;    // крупная круглая голова
 const CH_HEAD_Y    = 0.72;    // центр головы над землёй
 const CH_HEAD_DX   = 0.03;    // голова чуть подана вперёд
 const CH_BROW_A    = 0.60;    // шапка сдвинута вверх — доля радиуса головы
-// Борода — только со стороны лица: от уровня уха (середина высоты головы)
-// вниз и вперёд к подбородку. Углы по окружности головы: 0 — лицо, π/2 — низ.
-const CH_BEARD_A0  = 0.06;    // верх бороды у скулы, доля π
-const CH_BEARD_A1  = 0.66;    // низ, уже за подбородком — срежется клипом
-const CH_BEARD_T   = 0.30;   // (25–30% радиуса головы)    // вылет наружу — доля радиуса головы
-const CH_BEARD_IN  = 0.45;   // внутрь борода заходит на лицо глубже    // насколько внутренний край заходит на лицо
-const CH_BEARD_TIP = 0.45;    // доля толщины у верхнего конца — борода сходит на нет
+// Борода как на референсе: линия щеки идёт от бакенбарда у челюсти под ухом
+// вперёд и вниз к усам, а плотная масса свисает под подбородком. Углы — по
+// окружности головы: 0 — лицо на середине высоты, π/2 — низ, π — затылок.
+const CH_BEARD_SIDE = 0.76;   // назад доходит до челюсти под ухом, доля π
+const CH_BEARD_LIP  = 0.08;   // передний конец — усы у губы, доля π
+const CH_BEARD_CHEEK= 0.40;   // насколько линия щеки заходит на лицо, доля hr
+const CH_BEARD_OUT  = 0.46;   // вылет массы наружу под подбородком, доля hr
+const CH_BEARD_TIP  = 0.05;   // вылет у самых концов — усы и бакенбард
+const CH_BEARD_CLIP = 0.85;   // страховка: дальше назад борода не рисуется
 const CH_EYE_R     = 0.032;
 const CH_EYE       = { x: 0.10, y: -0.04 };  // глаз от центра головы
 const CH_BODY_W    = 0.46;    // короткое плотное тело
@@ -189,8 +191,8 @@ const CH_NOSE_R    = 0.045;   // нос-выступ на контуре лиц�
 const CH_NOSE      = { x: 0.21, y: 0.02 };
 const CH_BROW      = { x: 0.095, y: -0.085, w: 0.09, h: 0.024, a: -0.28 };
 const CH_CAP_CUFF  = 0.062;   // высота отворота шапки
-const CH_BEARD_WAVE  = 0.22;  // амплитуда волны внешнего края бороды
-const CH_BEARD_LOBES = 3.5;   // сколько волн по внешнему краю
+const CH_BEARD_WAVE  = 0.13;  // амплитуда волны внешнего края бороды
+const CH_BEARD_LOBES = 3;     // сколько волн по внешнему краю
 const CH_COLLAR_H  = 0.06;    // воротник
 const CH_PLACKET_W = 0.045;   // планка по центру рубашки
 const CH_PLACKET_X = 0.09;
@@ -1458,40 +1460,41 @@ function drawHead(p, h, lw) {
 }
 
 /**
- * Борода — полоса по скуле и подбородку, растущая только со стороны лица:
- * внутренний край прилегает к окружности головы, внешний идёт волной и
- * выступает наружу на CH_BEARD_T радиуса. Сзади бороды нет вообще — всё, что
- * заходит за вертикальную ось головы в сторону затылка, срезается клипом.
- * Сторона отдельно не задаётся: фигура зеркалится вместе с лицом.
+ * Борода в профиль: линия щеки идёт от бакенбарда у челюсти под ухом вперёд и
+ * вниз к усам, а внешний край уходит массой под подбородок и возвращается к
+ * челюсти волной. У концов масса сходит почти на нет — там усы и бакенбард.
+ * Затылок остаётся чистым: за CH_BEARD_CLIP назад ничего не рисуется (клип —
+ * страховка, сама фигура туда и не заходит). Сторона отдельно не задаётся:
+ * фигура зеркалится вместе с лицом.
  */
 function drawBeard(hx, hy, hr, lw) {
+  const aS = CH_BEARD_SIDE * Math.PI, aL = CH_BEARD_LIP * Math.PI;
+  const N = 24;
+
   ctx.save();
-  // Полуплоскость со стороны лица: за осью головы борода не рисуется.
   ctx.beginPath();
-  ctx.rect(hx, hy - hr * 2, hr * 3, hr * 4);
+  ctx.rect(hx - hr * CH_BEARD_CLIP, hy - hr * 2, hr * 4, hr * 4);
   ctx.clip();
 
-  const N = 26;
-  const a0 = CH_BEARD_A0 * Math.PI, a1 = CH_BEARD_A1 * Math.PI;
-  const inner = [], outer = [];
-  for (let i = 0; i <= N; i++) {
-    const u = i / N, a = a0 + (a1 - a0) * u;
-    const ca = Math.cos(a), sa = Math.sin(a);
-    // Борода сужается к обоим концам: у скулы — чтобы не торчала обрубком,
-    // у затылка — чтобы срез клипом был почти не виден.
-    const grow = CH_BEARD_TIP + (1 - CH_BEARD_TIP)
-               * Math.min(1, u / 0.45) * Math.min(1, (1 - u) / 0.22);
-    const t = CH_BEARD_T * grow
-              * (1 + CH_BEARD_WAVE * Math.sin(CH_BEARD_LOBES * 2 * Math.PI * u));
-    inner.push([hx + ca * hr * (1 - CH_BEARD_IN), hy + sa * hr * (1 - CH_BEARD_IN)]);
-    outer.push([hx + ca * hr * (1 + t),           hy + sa * hr * (1 + t)]);
-  }
   ctx.beginPath();
-  ctx.moveTo(inner[0][0], inner[0][1]);
-  for (let i = 1; i <= N; i++) ctx.lineTo(inner[i][0], inner[i][1]);
-  for (let i = N; i >= 0; i--) ctx.lineTo(outer[i][0], outer[i][1]);
+  // Линия щеки: по лицу, от бакенбарда к усам. В середине заходит глубже —
+  // это скула, а не ровная дуга по контуру головы.
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, a = aS + (aL - aS) * u;
+    const r = hr * (1 - CH_BEARD_CHEEK * Math.pow(Math.sin(Math.PI * u), 0.8));
+    const x = hx + Math.cos(a) * r, y = hy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  // Внешний край: обратно к челюсти, с массой под подбородком и волной.
+  for (let i = 0; i <= N; i++) {
+    const v = i / N, a = aL + (aS - aL) * v;
+    const f = Math.pow(Math.sin(Math.PI * Math.pow(v, 0.75)), 1.1);
+    const t = (CH_BEARD_TIP + (CH_BEARD_OUT - CH_BEARD_TIP) * f)
+            * (1 + CH_BEARD_WAVE * Math.sin(CH_BEARD_LOBES * 2 * Math.PI * v));
+    ctx.lineTo(hx + Math.cos(a) * hr * (1 + t), hy + Math.sin(a) * hr * (1 + t));
+  }
   ctx.closePath();
-  fillStroke(PALETTE.beard, Math.max(2, lw * 0.7));
+  fillStroke(PALETTE.beard, Math.max(2, lw * 0.8));
   ctx.restore();
 }
 
