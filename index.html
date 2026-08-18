@@ -128,14 +128,15 @@ const CLOUD_ALPHA   = 0.30;   // облака — атмосфера, а не о
 
 /* --- Ветка: доли L.branchLen, L.leafR, L.trunkW, L.crownR* --- */
 const BR_BEND       = 0.62;   // вынос контрольной точки дуги вбок
-const BR_DIP        = 0.14;   // прогиб у ствола: сперва вниз, потом вверх
-const BR_LEN        = 1.00;   // длина дуги — доля высоты сегмента (стиль)
-const BR_RISE       = 0.55;   // подъём конца дуги — доля её длины
+const BR_DIP        = 0.09;   // прогиб у ствола: сперва вниз, потом вверх
+const BR_LEN        = 0.95;   // длина дуги — доля высоты сегмента (стиль)
+const BR_RISE       = 0.62;   // подъём конца дуги — доля её длины
 const BRANCH_FIT    = 0.48;   // докуда крона дотягивается — доля ширины зоны
-const BR_W0         = 0.54;   // толщина у ствола — доля leafR
-const BR_W1         = 0.27;   // толщина на конце — доля leafR
-const BR_FLARE      = 2.4;    // как быстро утолщение у ствола сходит на нет
+const BR_W0         = 0.58;   // толщина у ствола — доля leafR
+const BR_W1         = 0.40;   // толщина на конце — доля leafR
+const BR_FLARE      = 2.0;    // как быстро утолщение у ствола сходит на нет
 const BR_ROOT       = 0.15;   // корень ветки внутри ствола — доля ширины ствола
+const CROWN_R       = 0.58;   // радиус листвы — доля высоты сегмента
 const CROWN_OFF     = 0.45;   // вынос центра кроны за конец дуги — доля rx
 const CROWN_DOT_R   = 0.20;   // радиус жёлтого блика — доля ry
 // Крона — облачко из пухлых долей: x, y и радиус в долях crownRx / crownRy.
@@ -149,7 +150,9 @@ const CROWN_PUFFS   = [
 ];
 
 /* --- Персонаж: все размеры — доли высоты фигуры h --- */
-const CHAR_H       = 0.22;    // высота фигуры — доля высоты зоны
+// Верхняя граница роста; фактический рост обычно ниже — его задаёт зазор до
+// ветки следующего сегмента (см. computeLayout).
+const CHAR_H       = 0.22;    // потолок высоты фигуры — доля высоты зоны
 const CH_W         = 0.64;    // ширина коробки персонажа
 const CH_LINE      = 0.85;    // обводка фигуры тоньше общей: детали мелкие
 const CH_HEAD_R    = 0.21;    // крупная круглая голова
@@ -234,7 +237,7 @@ const AXE_BITE       = 0.15;
 // От оси фигуры до поверхности ствола — доля высоты фигуры. Из этой величины
 // и AXE_BITE выводится длина топора в позе удара (см. strikeAxeLen).
 const CHAR_STAND     = 0.68;  // зазор до ствола — доля высоты фигуры
-const CHAR_CLEAR     = 0.08;  // запас между силуэтом и кроной — доля высоты фигуры
+const CHAR_CLEAR     = 0.12;  // зазор до кроны и до ветки над головой — доля роста
 // Силуэт фигуры вбок от её оси — половина её коробки (CH_W): в покое туда же
 // попадает поднятый топор, поэтому считаем по коробке, а не по телу.
 const CH_SIDE        = CH_W / 2;
@@ -511,11 +514,10 @@ function computeLayout() {
 
   const ground = Math.max(28, Math.min(zh * 0.13, 84));
   const baseY  = zh - ground;                      // линия земли внутри зоны
-  const charH  = zh * CHAR_H;                      // высота фигуры
-  // Шаг сегмента задан так, чтобы в зону влезало 6–8 ряд(ов) ветвей: дуги
-  // высокие, между ветками пустой сегмент, и при крупном шаге на экране
-  // оставалось бы всего две ветки.
-  const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 8));
+  // Шаг сегмента задан так, чтобы в зону влезало 8–9 рядов: между ветками
+  // пустой сегмент, значит на экране 3–4 ветки — как на референсе, и кроны
+  // не сливаются в стену.
+  const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 7));
   // Панель счёта компактная — она вспомогательная, поле важнее.
   const scoreSize = Math.round(Math.min(zw * 0.22, zh * 0.13, 68) / 1.5);
 
@@ -524,34 +526,69 @@ function computeLayout() {
 
   // В «стопке» зона широкая, а высота сегмента задана по вертикали —
   // делаем ствол толще, иначе он теряется на широком экране.
-  const trunkW = segH * (stacked ? 0.92 : 0.74);
+  const trunkW = segH * (stacked ? 1.02 : 0.82);
 
-  // Ветка — самый заметный объект: толстая «рука» и крупная крона.
-  // Крона крупная, как в референсе, но не шире, чем позволяет узкая зона.
-  let leafR      = Math.min(segH * 0.72, zw * 0.075);
+  // Ветка — самый заметный объект: короткая толстая «рука» и крупная крона,
+  // как на референсе. Крона не шире, чем позволяет узкая зона.
+  let leafR      = Math.min(segH * CROWN_R, zw * 0.075);
   const crownRx0 = leafR * 1.35, crownHalf = crownRx0 * 1.05;
-  // Длина одна для всех ветвей, но не меньше той, при которой крона обходит
-  // силуэт персонажа: он стоит вплотную к стволу, а ветка нижнего сегмента
-  // сидит на высоте удара — значит, крона должна уйти дальше него.
-  const clearLen = charH * (CHAR_STAND + CH_SIDE + CHAR_CLEAR)
-                 + crownHalf - crownRx0 * CROWN_OFF;
-  // И не больше того, что влезает в зону.
+
+  // Длина дуги — стилевая доля сегмента, как на референсе: ветка сидит близко
+  // к стволу, а крона проходит прямо над головой персонажа. Больше того, что
+  // влезает в зону, не берём.
   const fitLen = zw * BRANCH_FIT - trunkW / 2 - crownRx0 * CROWN_OFF - crownHalf;
-  let branchLen = Math.min(Math.max(segH * BR_LEN, clearLen), fitLen);
+  let branchLen  = Math.min(segH * BR_LEN, fitLen);
+  let branchRise = branchLen * BR_RISE;
+
+  // Ближайшая к голове ветка сидит на следующем сегменте — её основание на
+  // высоте 1.5·segH над землёй. У ствола дуга провисает (BR_DIP), дальше
+  // уходит вверх и заканчивается кроной, поэтому важна не одна точка, а самая
+  // низкая точка ветки над силуэтом фигуры. armLow возвращает, насколько
+  // низко ветка (дуга с её толщиной или свес кроны) опускается относительно
+  // своего основания на ширине силуэта.
+  const armLow = (len, rise, h) => {
+    const xa = trunkW / 2 + line + (CHAR_STAND - CH_SIDE) * h;   // от оси ствола
+    const xb = trunkW / 2 + line + (CHAR_STAND + CH_SIDE) * h;
+    const x0 = trunkW * BR_ROOT, kx = trunkW / 2 + len * BR_BEND;
+    const x1 = trunkW / 2 + len;
+    const w0 = leafR * BR_W0, w1 = leafR * BR_W1;
+    let low = -Infinity;
+    for (let i = 0; i <= 24; i++) {
+      const t = i / 24, mt = 1 - t;
+      const x = mt * mt * x0 + 2 * mt * t * kx + t * t * x1;
+      if (x < xa || x > xb) continue;
+      const y  = 2 * mt * t * len * BR_DIP - t * t * rise;
+      const hw = (w1 + (w0 - w1) * Math.pow(mt, BR_FLARE)) / 2;
+      low = Math.max(low, y + hw + line);
+    }
+    // Свес кроны: её центр вынесен за конец дуги, нижние доли висят на 0.85 ry
+    // ниже центра. Считаем, если крона вообще нависает над фигурой.
+    const ry = leafR * 1.02;
+    const fx = x1 + crownRx0 * CROWN_OFF;
+    if (fx + crownRx0 > xa && fx - crownRx0 < xb) {
+      low = Math.max(low, -rise - ry * 0.15 + ry * 0.85 + line);
+    }
+    // Ни дуга, ни крона над фигурой не проходят — ограничения нет.
+    return low > -Infinity ? low : -Infinity;
+  };
+  // Рост фигуры: сверху ограничен долей зоны (CHAR_H), но главное — макушка
+  // должна оставаться под веткой соседнего сегмента с зазором CHAR_CLEAR.
+  // Ширина силуэта сама зависит от роста, поэтому считаем в несколько
+  // проходов: рост только убывает и быстро сходится.
+  let charH = zh * CHAR_H;
+  for (let pass = 0; pass < 4; pass++) {
+    const low = armLow(branchLen, branchRise, charH);
+    if (low === -Infinity) break;
+    charH = Math.max(segH * 0.9,
+                     Math.min(charH, (segH * 1.5 - low) / (0.94 + CHAR_CLEAR)));
+  }
   if (branchLen < segH * 0.6) {                 // совсем узкая зона
     branchLen = segH * 0.6;
+    branchRise = branchLen * BR_RISE;
     leafR     = Math.max(leafR * 0.7, segH * 0.35);
   }
 
   const crownRx = leafR * 1.35, crownRy = leafR * 1.02;
-  // Подъём дуги — стилевой, одинаковый у всех ветвей. Если длины не хватило,
-  // чтобы обойти персонажа (узкая зона), подъём добирает остальное и крона
-  // проходит над головой.
-  const clears = branchLen + crownRx * CROWN_OFF - crownRx * 1.05
-               >= charH * (CHAR_STAND + CH_SIDE);
-  const overHead = charH * (0.94 + CHAR_CLEAR) - segH / 2 + crownRy * 0.90;
-  const branchRise = clears ? branchLen * BR_RISE
-                            : Math.max(branchLen * BR_RISE, overHead);
 
   L = {
     stacked,
@@ -1135,10 +1172,17 @@ function taperedArcPath(a, w0, w1) {
     up.push([px - dy / d * hw, py + dx / d * hw]);
     down.push([px + dy / d * hw, py - dx / d * hw]);
   }
+  // Конец дуги скруглён, как на референсе: ветка не обрублена торцом, а
+  // заканчивается округлым носом (его почти целиком накрывает крона).
+  const tx = a.x1 - a.kx, ty = a.y1 - a.ky;
+  const td = Math.hypot(tx, ty) || 1;
+  const cap = w1 * 0.67;
   ctx.beginPath();
   ctx.moveTo(up[0][0], up[0][1]);
   for (let i = 1; i <= N; i++) ctx.lineTo(up[i][0], up[i][1]);
-  for (let i = N; i >= 0; i--) ctx.lineTo(down[i][0], down[i][1]);
+  ctx.quadraticCurveTo(a.x1 + tx / td * cap, a.y1 + ty / td * cap,
+                       down[N][0], down[N][1]);
+  for (let i = N - 1; i >= 0; i--) ctx.lineTo(down[i][0], down[i][1]);
   ctx.closePath();
 }
 
