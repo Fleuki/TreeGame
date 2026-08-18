@@ -165,14 +165,13 @@ const CH_RED_MIX   = 0.55;    // доля красного в заливках �
 /* --- Топор: доли длины топора (сама длина — доля высоты персонажа) --- */
 const AXE_LEN        = 0.50;  // длина топора — доля высоты персонажа
 const AXE_BUTT       = 0.20;  // хвост рукояти за кистью
-const AXE_HANDLE_TH  = 0.13;  // толщина рукояти
-const AXE_BLADE_L    = 0.34;  // длина лезвия вдоль топорища
-const AXE_BLADE_W0   = 0.22;  // полувысота у обуха
-const AXE_BLADE_W1   = 0.44;  // полувысота у режущей кромки
-const AXE_EDGE_BULGE = 0.10;  // выгиб режущей кромки наружу
+const AXE_HANDLE_TH  = 0.115;  // толщина рукояти
+const AXE_BLADE_L    = 0.42;  // длина лезвия вдоль топорища
+const AXE_BLADE_W    = 0.30;  // полувысота лезвия
+const AXE_BLADE_R    = 0.03;  // еле заметное скругление углов лезвия
 // На сколько лезвие входит в ствол в момент удара — доля высоты фигуры.
 // Из неё выводится, где стоит персонаж (см. charBox).
-const AXE_BITE       = 0.10;
+const AXE_BITE       = 0.15;
 
 /* --- Анимация удара --- */
 const CHOP_WINDUP_T = 0.06;   // сек. замаха
@@ -180,9 +179,9 @@ const CHOP_STRIKE_T = 0.05;   // сек. удара
 const CHOP_RETURN_T = 0.12;   // сек. возврата
 const AXE_IDLE_A    = -30 * DEG;   // топор на плече в покое
 const AXE_WINDUP_A  = -78 * DEG;   // угол замаха
-// В момент контакта топорище почти горизонтально: плоскость лезвия ложится
-// на ствол и входит в него, а не бьёт рукоятью.
-const AXE_STRIKE_A  =   6 * DEG;
+// В момент контакта топорище смотрит ровно в ствол: лезвие входит в дерево
+// плашмя, а не бьёт рукоятью или углом.
+const AXE_STRIKE_A  =   0 * DEG;
 const BODY_LEAN_A   =   6 * DEG;   // наклон корпуса вперёд на ударе
 
 /* --- Промах --- */
@@ -1014,7 +1013,7 @@ function knockOffset(p) {
 
 /** Вынос режущей кромки от кисти вдоль топорища. */
 function bladeReach(h) {
-  return h * AXE_LEN * (1 + AXE_EDGE_BULGE);
+  return h * AXE_LEN;
 }
 
 /**
@@ -1055,19 +1054,14 @@ function handPoint(pose, h) {
 function drawAxeShape(len, lw) {
   const th  = len * AXE_HANDLE_TH;
   const bx0 = len * (1 - AXE_BLADE_L);         // где начинается лезвие
-  const w0  = len * AXE_BLADE_W0, w1 = len * AXE_BLADE_W1;
+  const bw  = len * AXE_BLADE_W;               // полувысота лезвия
 
   // Скруглённая рукоять: от хвоста за кистью до основания лезвия.
   roundRect(-len * AXE_BUTT, -th / 2, len * AXE_BUTT + bx0 + th, th, th / 2);
   fillStroke(PALETTE.axeHandle, lw);
 
-  // Трапециевидное лезвие, режущая кромка чуть выгнута наружу.
-  ctx.beginPath();
-  ctx.moveTo(bx0, -w0);
-  ctx.lineTo(len, -w1);
-  ctx.quadraticCurveTo(len + len * AXE_EDGE_BULGE, 0, len, w1);
-  ctx.lineTo(bx0, w0);
-  ctx.closePath();
+  // Лезвие — прямая колодка: так топор читается топором даже мелко на экране.
+  roundRect(bx0, -bw, len - bx0, bw * 2, len * AXE_BLADE_R);
   fillStroke(PALETTE.axeBlade, lw);
 }
 
