@@ -93,7 +93,7 @@ const PALETTE = {
 /* =========================================================================
    2. КОНСТАНТЫ
    ========================================================================= */
-const WIN_SCORE    = 50;      // очков до победы
+const WIN_SCORE    = 100;     // очков до победы
 const STUN_TIME    = 0.7;     // сек. ошеломления
 const TRUNK_TWEEN  = 0.08;    // сек. плавного опускания ствола
 const SHAKE_TIME   = 0.12;    // сек. тряски зоны от удара
@@ -236,6 +236,11 @@ const BRANCH_CHANCE= 0.65;    // вероятность ветки на ново
 const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
 const SAFE_START   = 3;       // первые сегменты — всегда без веток
 const MIN_TRUNK    = 14;      // минимум сегментов в памяти (дополняется под экран)
+const TUTORIAL_TIME = 3.0;    // сек. показа подсказок перед первым забегом
+const TUT_PULSE     = 6;      // рад/с пульсации кругов
+const TUT_R         = 0.11;   // радиус круга-подсказки — доля ширины зоны
+const TUT_Y         = 0.62;   // высота кругов — доля высоты неба зоны
+const TUT_CROSS     = 0.62;   // размер крестика — доля радиуса кроны
 const CD_STEPS     = 3;       // «3 · 2 · 1» перед боем
 const CD_STEP_TIME = 0.55;    // сек. на цифру
 const GO_TIME      = 0.45;    // сек. надписи «РУБИ!»
@@ -245,9 +250,9 @@ const NONE = 'NONE', LEFT = 'LEFT', RIGHT = 'RIGHT';
 
 // Уровни сложности бота: интервал удара сжимается по мере набора очков.
 const DIFFICULTY = [
-  { id:'easy',   name:'Легко',     start:0.78, min:0.42, err:0.20 },
-  { id:'normal', name:'Нормально', start:0.55, min:0.26, err:0.12 },
-  { id:'hard',   name:'Сложно',    start:0.42, min:0.19, err:0.06 }
+  { id:'easy',   name:'Легко',   start:0.65, min:0.38, err:0.20 },
+  { id:'normal', name:'Средне',  start:0.48, min:0.24, err:0.12 },
+  { id:'hard',   name:'Сложно',  start:0.38, min:0.17, err:0.06 }
 ];
 
 
@@ -268,6 +273,13 @@ let clock   = 0;                     // общее время, для колеб
 let countdown = 0;                   // отсчёт перед стартом
 let goFlash = 0;                     // таймер надписи «РУБИ!»
 let buttons = [];                    // активные кнопки текущей сцены
+let tutorial = 0;                    // таймер подсказок первого забега
+
+// Подсказки показываются один раз за сессию вкладки. sessionStorage может быть
+// недоступен (приватный режим, iframe) — тогда просто покажем их снова.
+const TUT_KEY = 'lumberjacks-tutorial-seen';
+function tutorialSeen()     { try { return sessionStorage.getItem(TUT_KEY) === '1'; } catch (e) { return false; } }
+function markTutorialSeen() { try { sessionStorage.setItem(TUT_KEY, '1'); } catch (e) {} }
 
 function makePlayer(index, isBot) {
   return {
@@ -598,6 +610,7 @@ function startGame(newMode) {
     p.botTimer = diff.start;
   }
   winner = null;
+  tutorial = tutorialSeen() ? 0 : TUTORIAL_TIME;
   countdown = CD_STEPS * CD_STEP_TIME;
   goFlash = 0;
   scene = 'play';
@@ -605,6 +618,9 @@ function startGame(newMode) {
 
 function chopAttempt(p, side) {
   if (scene !== 'play' || countdown > 0) return;
+
+  // Первый же удар — подсказки больше не нужны.
+  if (tutorial > 0) { tutorial = 0; markTutorialSeen(); }
 
   // Подсветка половины зоны — отклик на само касание, до всех проверок,
   // чтобы игрок видел выбранную сторону даже когда тап пропал впустую.
@@ -733,6 +749,11 @@ function update(dt) {
   clock += dt;
 
   if (goFlash > 0) goFlash = Math.max(0, goFlash - dt);
+
+  if (tutorial > 0) {
+    tutorial = Math.max(0, tutorial - dt);
+    if (tutorial === 0) markTutorialSeen();
+  }
 
   if (scene === 'play' && countdown > 0) {
     const before = Math.ceil(countdown / CD_STEP_TIME);
@@ -966,6 +987,23 @@ function trunkCap(cx, y, cw, ch) {
  *  - drawBranchCrown — крона на конце дуги, поверх ствола.
  * Хитбокс не меняется: логике по-прежнему важна только сторона ветки.
  */
+
+/**
+ * Влезает ли крона ветки в зону целиком. Ветку, которая пересекает верхнюю
+ * границу, не рисуем вовсе: клип по зоне срезал бы её ровно по разделителю,
+ * и на стыке две обрезанные кроны соседних зон слипались бы в одно пятно.
+ */
+function branchFitsZone(cy) {
+  const top = cy - L.branchLen * BR_RISE - L.crownRy * 1.15 - L.line * 2;
+  return top > 0;
+}
+
+/** Центр кроны ветки — им пользуются и отрисовка, и подсказка-крестик. */
+function crownCenter(cx, cy, side, w) {
+  const dir = side === LEFT ? -1 : 1;
+  const a = branchTip(cx, cy, dir, w);
+  return { x: a.x1 + dir * L.crownRx * CROWN_OFF, y: a.y1 - L.crownRy * 0.15 };
+}
 
 /** Конец дуги ветки — точка, где сидит крона. */
 function branchTip(cx, cy, dir, w) {
@@ -1425,7 +1463,7 @@ function drawZone(p) {
     for (let i = count - 1; i >= 0; i--) {
       if (p.segments[i].branch === NONE) continue;
       const cy = segY(i, slide);
-      if (cy - L.segH > L.zh) continue;
+      if (cy - L.segH > L.zh || !branchFitsZone(cy)) continue;
       arms.push(branchArm(cx, cy, p.segments[i].branch, L.trunkW));
     }
 
@@ -1438,7 +1476,7 @@ function drawZone(p) {
     for (let i = count - 1; i >= 1; i--) {
       if (p.segments[i].branch === NONE) continue;
       const cy = segY(i, slide);
-      if (cy - L.segH > L.zh) continue;
+      if (cy - L.segH > L.zh || !branchFitsZone(cy)) continue;
       drawBranchCrown(cx, cy, p.segments[i].branch, L.trunkW, L.segH);
     }
 
@@ -1450,6 +1488,7 @@ function drawZone(p) {
     }
 
     drawParticles(p);
+    if (tutorial > 0 && scene === 'play') drawTutorial(p, cx, slide);
     ctx.restore(); // тряска
 
     // Подсветка половины зоны под пальцем — видно, какую сторону выбрал
@@ -1481,6 +1520,57 @@ function drawZone(p) {
 
     drawScore(p);
   });
+}
+
+/**
+ * Подсказки первого забега — без единого слова, чтобы не переводить их и не
+ * заставлять читать: два пульсирующих круга на левой и правой половине зоны
+ * (сюда тапать) и крестик на кроне нижней ветки (сюда — нельзя).
+ * Гаснут за последние полсекунды или на первом же ударе.
+ */
+function drawTutorial(p, cx, slide) {
+  const a = Math.min(1, tutorial / 0.5);
+  const pulse = 0.5 + 0.5 * Math.sin(clock * TUT_PULSE);
+  ctx.save();
+  ctx.globalAlpha = a;
+
+  // Куда тапать: круг на каждой половине зоны.
+  const r = L.zw * TUT_R * (0.86 + 0.14 * pulse);
+  const y = L.baseY * TUT_Y;
+  for (const s of [0.25, 0.75]) {
+    circlePath(L.zw * s, y, r);
+    ctx.fillStyle = PALETTE.white;
+    ctx.globalAlpha = a * (0.18 + 0.16 * pulse);
+    ctx.fill();
+    ctx.globalAlpha = a;
+    setOutline(Math.max(3, L.line * 0.8));
+    ctx.stroke();
+  }
+
+  // Чего избегать: крестик на ближайшей снизу ветке. Первые сегменты всегда
+  // без веток (SAFE_START), поэтому ищем нижнюю из тех, что видно.
+  let bi = -1;
+  for (let i = 0; i < p.segments.length; i++) {
+    const cy = segY(i, slide);
+    if (p.segments[i].branch === NONE) continue;
+    if (cy < 0 || !branchFitsZone(cy)) continue;
+    bi = i; break;
+  }
+  if (bi >= 0) {
+    const branch = p.segments[bi].branch;
+    const c = crownCenter(cx, segY(bi, slide), branch, L.trunkW);
+    const d = L.crownRy * TUT_CROSS * (0.9 + 0.1 * pulse);
+    ctx.lineCap = 'round';
+    for (const pass of [0, 1]) {
+      ctx.strokeStyle = pass ? PALETTE.danger : PALETTE.outline;
+      ctx.lineWidth = pass ? L.line * 1.6 : L.line * 3.2;
+      ctx.beginPath();
+      ctx.moveTo(c.x - d, c.y - d); ctx.lineTo(c.x + d, c.y + d);
+      ctx.moveTo(c.x + d, c.y - d); ctx.lineTo(c.x - d, c.y + d);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }
 
 function easeOut(t) { return t * t; }   // твин ствола: быстрый старт, мягкий стоп
@@ -1533,22 +1623,47 @@ function drawCountdown() {
 
 
 /* ---------- Экраны меню ---------- */
-function button(x, y, w, h, label, sub, action, hi) {
+
+// Кнопки крупные: пальцем по ним попадают оба игрока, в том числе вслепую.
+const BTN_MIN_H  = 60;        // px — минимальная высота кнопки
+const BTN_MAX_H  = 84;
+const BTN_GAP    = 16;
+
+/**
+ * Кнопка в стиле игры: скруглённый прямоугольник с чёрной обводкой.
+ * dual — продублировать подпись вверх ногами: на экране-«стопке» верхний
+ * игрок сидит с другой стороны телефона и иначе читать не может.
+ */
+function button(x, y, w, h, label, sub, action, hi, dual) {
   buttons.push({ x, y, w, h, action });
   roundRect(x, y, w, h, h * 0.28);
   fillStroke(hi ? PALETTE.btnHi : PALETTE.btn, Math.max(4, L.line));
 
-  ctx.fillStyle = PALETTE.text;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = sub ? 'alphabetic' : 'middle';
-  ctx.font = 'bold ' + Math.round(Math.min(w * 0.105, 25)) + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(label, x + w / 2, sub ? y + h * 0.46 : y + h / 2);
-  if (sub) {
-    ctx.fillStyle = PALETTE.textDim;
-    ctx.textBaseline = 'top';
-    ctx.font = '500 ' + Math.round(Math.min(w * 0.062, 14)) + 'px system-ui, -apple-system, sans-serif';
-    ctx.fillText(sub, x + w / 2, y + h * 0.58);
-  }
+  const size = Math.round(Math.min(w * 0.105, 25));
+  const subSize = Math.round(Math.min(w * 0.062, 14));
+
+  // Одна половина кнопки на игрока, если подпись двусторонняя.
+  const face = (flip) => {
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2);
+    if (flip) ctx.rotate(Math.PI);
+    ctx.textAlign = 'center';
+    const dy = dual ? h * 0.22 : 0;
+    ctx.fillStyle = PALETTE.text;
+    ctx.textBaseline = sub ? 'alphabetic' : 'middle';
+    ctx.font = 'bold ' + size + 'px system-ui, -apple-system, sans-serif';
+    ctx.fillText(label, 0, sub ? dy - h * 0.04 : dy);
+    if (sub) {
+      ctx.fillStyle = PALETTE.textDim;
+      ctx.textBaseline = 'top';
+      ctx.font = '500 ' + subSize + 'px system-ui, -apple-system, sans-serif';
+      ctx.fillText(sub, 0, dy + h * 0.08);
+    }
+    ctx.restore();
+  };
+
+  face(false);
+  if (dual) face(true);
 }
 
 function drawTitle(title, subtitle) {
@@ -1566,12 +1681,13 @@ function drawMenu() {
   buttons = [];
   drawTitle('ЛЕСОРУБЫ', 'дуэль до ' + WIN_SCORE + ' очков');
 
-  const bw = Math.min(W * 0.72, 420), bh = Math.min(H * 0.11, 84);
+  const bw = Math.min(W * 0.72, 420);
+  const bh = Math.max(BTN_MIN_H, Math.min(H * 0.11, BTN_MAX_H));
   const x = (W - bw) / 2;
   let y = H * 0.42;
   button(x, y, bw, bh, 'Против бота', 'сложность: ' + diff.name,
          () => { scene = 'difficulty'; }, true);
-  y += bh + 18;
+  y += bh + BTN_GAP;
   button(x, y, bw, bh, 'На двоих',
          L.stacked ? 'один снизу, второй сверху' : 'один экран, два игрока',
          () => startGame('duo'), false);
@@ -1588,15 +1704,16 @@ function drawDifficulty() {
   buttons = [];
   drawTitle('Сложность', null);
 
-  const bw = Math.min(W * 0.72, 420), bh = Math.min(H * 0.095, 72);
+  const bw = Math.min(W * 0.72, 420);
+  const bh = Math.max(BTN_MIN_H, Math.min(H * 0.11, BTN_MAX_H));
   const x = (W - bw) / 2;
-  let y = H * 0.36;
+  let y = H * 0.34;
   for (const d of DIFFICULTY) {
     button(x, y, bw, bh, d.name, null,
            () => { diff = d; startGame('bot'); }, d.id === diff.id);
-    y += bh + 14;
+    y += bh + BTN_GAP;
   }
-  button(x, y + 10, bw, bh * 0.8, 'Назад', null, () => { scene = 'menu'; }, false);
+  button(x, y + 8, bw, BTN_MIN_H, 'Назад', null, () => { scene = 'menu'; }, false);
 }
 
 function drawGameOver() {
@@ -1610,12 +1727,13 @@ function drawGameOver() {
 
   buttons = [];
 
-  // Итог рисуем в каждой зоне: проигравший сверху читает его не вверх ногами.
+  // Итог рисуем в каждой зоне: верхний игрок читает его не вверх ногами.
   const pulse = 1 + Math.sin(clock * 4) * 0.03;
   const big   = Math.round(Math.min(L.zw * 0.13, L.zh * 0.11, 56));
   for (const p of players) {
+    const foe = players[p.index === 0 ? 1 : 0];
     withZone(p, () => {
-      const cx = L.zw / 2, cy = L.zh * (L.stacked ? 0.34 : 0.28);
+      const cx = L.zw / 2, cy = L.zh * (L.stacked ? 0.40 : 0.26);
       const word = p === winner ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.font = 'bold ' + big + 'px system-ui, -apple-system, sans-serif';
@@ -1627,19 +1745,24 @@ function drawGameOver() {
       outlinedText(word, 0, 0, big, p === winner ? PALETTE.accent : PALETTE.white);
       ctx.restore();
 
+      // Счёт обоих, свой сверху — так каждый сразу видит собственный результат.
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      outlinedText(players[0].score + ' : ' + players[1].score,
-                   cx, cy + big * 1.1, big * 0.6);
+      outlinedText(p.name + ' — ' + p.score, cx, cy + big * 0.95, big * 0.42,
+                   p === winner ? PALETTE.accent : PALETTE.white);
+      outlinedText(foe.name + ' — ' + foe.score, cx, cy + big * 1.55, big * 0.42,
+                   foe === winner ? PALETTE.accent : PALETTE.white);
     });
   }
 
   // Кнопки — одни на двоих, по центру экрана, до них дотягиваются оба.
-  const bw = Math.min(W * 0.66, 380), bh = Math.min(H * 0.09, 72);
+  // В «стопке» подписи двусторонние: верхний игрок сидит с другой стороны.
+  const bw = Math.min(W * 0.66, 380);
+  const bh = Math.max(BTN_MIN_H, Math.min(H * 0.10, BTN_MAX_H));
   const x  = (W - bw) / 2;
-  let y = L.stacked ? H / 2 - bh - 8 : H * 0.58;
-  button(x, y, bw, bh, 'Ещё раз', null, () => startGame(mode), true);
-  y += bh + 16;
-  button(x, y, bw, bh * 0.82, 'В меню', null, () => { scene = 'menu'; }, false);
+  let y = L.stacked ? H / 2 - bh - BTN_GAP / 2 : H * 0.56;
+  button(x, y, bw, bh, 'Ещё раз', null, () => startGame(mode), true, L.stacked);
+  y += bh + BTN_GAP;
+  button(x, y, bw, bh, 'В меню', null, () => { scene = 'menu'; }, false, L.stacked);
 }
 
 function render() {
