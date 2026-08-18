@@ -63,12 +63,18 @@ const PALETTE = {
   // тону: иначе на маленьком спрайте шапка, борода и одежда слипаются
   // с чёрной обводкой в одно тёмное пятно.
   skin:        '#f7d3a6',
-  hair:        '#4b3520',   // шапка-волосы: тёмная, но не чёрная
-  beard:       '#a8703c',   // борода светлее шапки и темнее кожи
-  shirtRed:    '#ea5348',   // игрок 1
-  shirtBlue:   '#3f7fd0',   // игрок 2 и бот
-  pants:       '#31405c',   // тёмные штаны
-  boots:       '#7a4a25',   // коричневые ботинки — светлее штанов
+  hair:         '#4b3520',  // шапка-бини: тёмная, но не чёрная
+  hairCuff:     '#7d5a33',  // отворот шапки — на тон светлее
+  beard:        '#a8703c',  // борода светлее шапки и темнее кожи
+  shirtRed:     '#ea5348',  // игрок 1
+  shirtRedDark: '#c23a30',  // воротник, планка и манжет
+  shirtBlue:    '#3f7fd0',  // игрок 2 и бот
+  shirtBlueDark:'#2f62a8',
+  pants:        '#31405c',  // тёмные штаны
+  belt:         '#2a2118',  // ремень
+  buckle:       '#e8b53c',  // пряжка
+  boots:        '#7a4a25',  // коричневые ботинки — светлее штанов
+  bootSole:     '#4a2c14',  // подошва темнее самого ботинка
   axeHandle:   '#c9974f',   // рукоять
   axeBlade:    '#d8e0e8',   // лезвие — светло-серое, не белое
 
@@ -151,7 +157,7 @@ const CH_HEAD_Y    = 0.72;    // центр головы над землёй
 const CH_HEAD_DX   = 0.03;    // голова чуть подана вперёд
 const CH_BROW_A    = 0.60;    // шапка сдвинута вверх — доля радиуса головы
 const CH_BEARD_RX  = 0.155;    // борода — приплюснутый овал
-const CH_BEARD_RY  = 0.105;
+const CH_BEARD_RY  = 0.095;
 const CH_BEARD_DY  = 0.15;    // борода ниже центра головы
 const CH_EYE_R     = 0.032;
 const CH_EYE       = { x: 0.10, y: -0.04 };  // глаз от центра головы
@@ -170,6 +176,28 @@ const CH_SHOULDER  = { x: 0.10, y: 0.50 };   // плечо: от оси и на�
 const CH_HAND_IDLE   = { x: 0.24, y: 0.38 };
 const CH_HAND_STRIKE = { x: 0.40, y: 0.50 };
 const CH_RED_MIX   = 0.55;    // доля красного в заливках на промахе
+
+/* --- Детали фигуры: всё в долях высоты h, кроме покачивания в px --- */
+const CH_BOB_PX    = 2;       // px покачивания в покое
+const CH_BOB_T     = 1.2;     // сек. периода покачивания
+const CH_EAR_RX    = 0.035;   // ухо — овал на щеке, поверх лица
+const CH_EAR_RY    = 0.052;
+const CH_EAR       = { x: -0.115, y: 0.03 };  // от центра головы
+const CH_NOSE_R    = 0.045;   // нос-выступ на контуре лица
+const CH_NOSE      = { x: 0.21, y: 0.02 };
+const CH_BROW      = { x: 0.095, y: -0.085, w: 0.09, h: 0.024, a: -0.28 };
+const CH_CAP_CUFF  = 0.062;   // высота отворота шапки
+const CH_BEARD_WAVE  = 0.20;  // амплитуда волны нижнего края бороды — доля ry
+const CH_BEARD_LOBES = 4;     // сколько волн по нижнему краю
+const CH_COLLAR_H  = 0.06;    // воротник
+const CH_PLACKET_W = 0.045;   // планка по центру рубашки
+const CH_PLACKET_X = 0.09;
+const CH_CUFF_W    = 0.06;    // манжет у кисти
+const CH_BELT_H    = 0.055;   // ремень
+const CH_BUCKLE    = 0.06;    // пряжка
+const CH_SOLE_H    = 0.035;   // подошва
+const CH_FIST_R    = 0.062;   // кисть на рукояти
+const CH_THUMB_R   = 0.032;   // большой палец поверх рукояти
 
 /* --- Топор: доли длины топора (сама длина — доля высоты персонажа) --- */
 const AXE_LEN        = 0.56;  // длина топора — доля высоты персонажа
@@ -224,6 +252,15 @@ const DASH_SPEED    = 620;    // px/с разлёта
 const DASH_W        = 0.07;   // толщина линии — доля её длины
 const CHIP_COUNT    = 8;      // мелкие крошки — дополнение
 
+/* --- Срубленная ветка улетает вместе с кроной --- */
+const FLY_LIFE      = 0.60;   // сек. полёта до полного исчезновения
+const FLY_VX        = 200;    // px/с от ствола, плюс разброс
+const FLY_VX_RND    = 180;
+const FLY_VY        = -260;   // подброс, дугу даёт гравитация
+const FLY_VY_RND    = 160;
+const FLY_G         = 1200;
+const FLY_SPIN      = 7;      // рад/с, знак и величина случайны
+
 /* --- Промах --- */
 const MISS_KNOCK_PX = 15;     // px отлёта от ствола
 const MISS_KNOCK_T  = 0.20;   // сек. отлёта и возврата
@@ -252,7 +289,8 @@ const NONE = 'NONE', LEFT = 'LEFT', RIGHT = 'RIGHT';
 const DIFFICULTY = [
   { id:'easy',   name:'Легко',   start:0.65, min:0.38, err:0.20 },
   { id:'normal', name:'Средне',  start:0.48, min:0.24, err:0.12 },
-  { id:'hard',   name:'Сложно',  start:0.38, min:0.17, err:0.06 }
+  { id:'hard',   name:'Сложно',  start:0.30, min:0.13, err:0.030 },
+  { id:'master', name:'Мастер',  start:0.24, min:0.11, err:0.015 }
 ];
 
 
@@ -297,7 +335,8 @@ function makePlayer(index, isBot) {
     knock: 0,            // отлёт персонажа назад на промахе
     tapFlash: 0,         // подсветка половины зоны под пальцем
     tapSide: LEFT,       // какую половину подсветить
-    shirt: index === 0 ? 'shirtRed' : 'shirtBlue',  // цвет рубашки в PALETTE
+    shirt:     index === 0 ? 'shirtRed'     : 'shirtBlue',      // цвет рубашки
+    shirtDark: index === 0 ? 'shirtRedDark' : 'shirtBlueDark',  // её детали
     chipPending: false,  // щепки ждут момента контакта лезвия
     scorePop: 0,         // pop-анимация счётчика
     particles: [],
@@ -644,6 +683,7 @@ function chopAttempt(p, side) {
   }
 
   // Чистый удар: нижний сегмент уходит, ствол опускается, сверху новый.
+  if (bottom.branch !== NONE) spawnFlyingBranch(p, bottom.branch);
   p.segments.shift();
   p.segments.push(nextSegment(p.segments));
   p.trunkAnim = 1;
@@ -722,6 +762,28 @@ function spawnChips(p, side) {
       color: Math.random() < 0.5 ? PALETTE.chip : PALETTE.chipDark
     });
   }
+}
+
+/**
+ * Срубленная ветка не исчезает, а улетает целиком — дуга и крона как один
+ * объект: вращается вокруг своего центра, летит по дуге от ствола и тает.
+ */
+function spawnFlyingBranch(p, side) {
+  const dir = side === LEFT ? -1 : 1;
+  const cx  = L.zw / 2, cy = segY(0, 0);
+  const c   = crownCenter(cx, cy, side, L.trunkW);
+  p.particles.push({
+    kind: 'branch', side,
+    x: c.x, y: c.y,
+    vx: dir * (FLY_VX + Math.random() * FLY_VX_RND),
+    vy: FLY_VY + Math.random() * FLY_VY_RND,
+    g: FLY_G,
+    life: FLY_LIFE, max: FLY_LIFE,
+    size: L.trunkW,
+    rot: 0,
+    spin: (Math.random() < 0.5 ? -1 : 1) * FLY_SPIN * (0.6 + Math.random() * 0.8),
+    color: PALETTE.trunk
+  });
 }
 
 function spawnLeaves(p, side) {
@@ -1053,6 +1115,15 @@ function taperedArcPath(a, w0, w1) {
  * выходит только гладкое утолщение — ветка вырастает из дерева.
  * Цвет — тот же, что у ствола (PALETTE.trunk).
  */
+/** Дуга ветки отдельной фигурой — для срубленной ветки в полёте. */
+function drawBranchArm(cx, cy, side, w) {
+  const a = branchArm(cx, cy, side, w);
+  setOutline(L.line * 2);
+  taperedArcPath(a.arc, a.w0, a.w1); ctx.stroke();
+  ctx.fillStyle = tinted(PALETTE.trunk);
+  taperedArcPath(a.arc, a.w0, a.w1); ctx.fill();
+}
+
 function branchArm(cx, cy, side, w) {
   return {
     arc: branchTip(cx, cy, side === LEFT ? -1 : 1, w),
@@ -1230,46 +1301,152 @@ function drawLumberjack(p, box) {
   const tilt = p.knock > 0 ? -MISS_TILT_A * (p.knock / MISS_KNOCK_T) : 0;
   const wob  = p.stun > 0 ? Math.sin(clock * 38) * 0.05 : 0;
   const lw   = Math.max(3, L.line * CH_LINE);
+  // В покое фигура едва заметно дышит — стоячий персонаж не выглядит мёртвым.
+  const bob  = pose.strike ? 0 : Math.sin(clock * 6.2832 / CH_BOB_T) * CH_BOB_PX;
 
   ctx.save();
-  ctx.translate(x, L.baseY);
+  ctx.translate(x, L.baseY + bob);
   ctx.scale(dir, 1);                  // правая сторона — зеркало
   ctx.rotate(pose.lean + tilt + wob); // поворот вокруг точки у ног
 
-  // Ноги и ботинки: ботинки шире ног, чтобы фигура твёрдо стояла.
+  drawLegs(h, lw);
+  const hand = handPoint(pose, h);
+  drawArm(p, hand, h, lw);
+  drawBody(p, h, lw);
+  drawHead(p, h, lw);
+
+  // Топор поверх фигуры, кисть — поверх топора: она обхватывает рукоять.
+  ctx.save();
+  ctx.translate(hand.x, hand.y);
+  ctx.rotate(pose.axe);
+  if (pose.strike) drawAxeStrike(strikeAxeLen(h), h * AXE_LEN, lw);
+  else             drawAxeShape(h * AXE_LEN, lw);
+  ctx.restore();
+  drawFist(hand, pose, h, lw);
+
+  ctx.restore();
+}
+
+/** Ноги в тёмных штанах и коричневые ботинки с тёмной подошвой. */
+function drawLegs(h, lw) {
   for (const s of [-1, 1]) {
     const lx = s * CH_LEG_DX * h;
     roundRect(lx - CH_LEG_W * h / 2, -CH_LEG_H * h,
               CH_LEG_W * h, CH_LEG_H * h, CH_LEG_W * h * 0.4);
     fillStroke(PALETTE.pants, lw);
-    roundRect(lx - CH_BOOT_W * h * 0.4, -CH_BOOT_H * h,
-              CH_BOOT_W * h, CH_BOOT_H * h, CH_BOOT_H * h * 0.5);
-    fillStroke(PALETTE.boots, lw);
-  }
 
-  // Рука с топором — за корпусом, чтобы плечо не торчало поверх рубашки.
-  const hand = handPoint(pose, h);
+    const bx = lx - CH_BOOT_W * h * 0.4;
+    roundRect(bx, -CH_BOOT_H * h, CH_BOOT_W * h, CH_BOOT_H * h, CH_BOOT_H * h * 0.5);
+    fillStroke(PALETTE.boots, lw);
+    // Подошва — та же форма, но только нижняя полоса, поэтому её обрезаем.
+    ctx.save();
+    ctx.clip();
+    roundRect(bx, -CH_SOLE_H * h, CH_BOOT_W * h, CH_SOLE_H * h, CH_SOLE_H * h * 0.4);
+    ctx.fillStyle = tinted(PALETTE.bootSole);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+/** Рука от плеча к кисти, с манжетом рубашки у запястья. */
+function drawArm(p, hand, h, lw) {
   outlinedBar(hand.sx, hand.sy, hand.x, hand.y, CH_ARM_TH * h, PALETTE.skin);
 
-  // Короткое плотное тело
-  roundRect(-CH_BODY_W * h / 2, -(CH_LEG_H + CH_BODY_H) * h,
-            CH_BODY_W * h, CH_BODY_H * h, CH_BODY_R * h);
+  // Манжет — поперёк руки, чуть не доходя до кисти.
+  const ax = hand.x - hand.sx, ay = hand.y - hand.sy;
+  const len = Math.hypot(ax, ay) || 1;
+  const cw = CH_CUFF_W * h;
+  ctx.save();
+  ctx.translate(hand.x - ax / len * cw * 0.9, hand.y - ay / len * cw * 0.9);
+  ctx.rotate(Math.atan2(ay, ax));
+  roundRect(-cw / 2, -CH_ARM_TH * h * 0.62, cw, CH_ARM_TH * h * 1.24, cw * 0.3);
+  fillStroke(PALETTE[p.shirtDark], lw);
+  ctx.restore();
+}
+
+/** Кисть, обхватывающая рукоять: кулак и большой палец поверх неё. */
+function drawFist(hand, pose, h, lw) {
+  circlePath(hand.x, hand.y, CH_FIST_R * h);
+  fillStroke(PALETTE.skin, lw);
+  const tx = hand.x + Math.cos(pose.axe) * CH_FIST_R * h * 0.55;
+  const ty = hand.y + Math.sin(pose.axe) * CH_FIST_R * h * 0.55;
+  circlePath(tx, ty, CH_THUMB_R * h);
+  fillStroke(PALETTE.skin, lw);
+}
+
+/** Тело: рубашка, тёмный воротник, планка по центру и ремень с пряжкой. */
+function drawBody(p, h, lw) {
+  const bw = CH_BODY_W * h;
+  const top = -(CH_LEG_H + CH_BODY_H) * h, bot = -CH_LEG_H * h;
+
+  roundRect(-bw / 2, top, bw, CH_BODY_H * h, CH_BODY_R * h);
   fillStroke(PALETTE[p.shirt], lw);
 
-  // Голова, борода, шапка, глаз
+  // Детали рубашки живут внутри её силуэта.
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = tinted(PALETTE[p.shirtDark]);
+  roundRect(-bw / 2, top, bw, CH_COLLAR_H * h, CH_COLLAR_H * h * 0.4);
+  ctx.fill();
+  roundRect(CH_PLACKET_X * h - CH_PLACKET_W * h / 2, top,
+            CH_PLACKET_W * h, bot - top, CH_PLACKET_W * h * 0.3);
+  ctx.fill();
+  ctx.restore();
+
+  // Ремень поверх рубашки, у самого пояса.
+  const beltY = bot - CH_BELT_H * h;
+  roundRect(-bw / 2, beltY, bw, CH_BELT_H * h, CH_BELT_H * h * 0.25);
+  fillStroke(PALETTE.belt, lw);
+  roundRect(CH_PLACKET_X * h - CH_BUCKLE * h / 2, beltY + (CH_BELT_H - CH_BUCKLE) * h / 2,
+            CH_BUCKLE * h, CH_BUCKLE * h, CH_BUCKLE * h * 0.25);
+  fillStroke(PALETTE.buckle, Math.max(2, lw * 0.7));
+}
+
+/**
+ * Голова в профиль: ухо сзади, нос-выступ на контуре лица, шапка-бини с
+ * отворотом, фигурная борода с волнистым краем, бровь и глаз.
+ * Ухо, нос и череп сперва обводятся целиком, потом заливаются — обводка
+ * остаётся только по внешнему контуру, и детали не режут друг друга.
+ */
+function drawHead(p, h, lw) {
   const hx = CH_HEAD_DX * h, hy = -CH_HEAD_Y * h, hr = CH_HEAD_R * h;
-  circlePath(hx, hy, hr);
-  fillStroke(PALETTE.skin, lw);
 
+  const nose = () => circlePath(hx + CH_NOSE.x * h, hy + CH_NOSE.y * h, CH_NOSE_R * h);
+  const skull= () => circlePath(hx, hy, hr);
+
+  // Нос и череп — один силуэт: обводим оба, потом заливаем, иначе обводка
+  // черепа перечеркнула бы выступ носа.
+  setOutline(lw * 2);
+  nose(); ctx.stroke(); skull(); ctx.stroke();
+  ctx.fillStyle = tinted(PALETTE.skin);
+  nose(); ctx.fill(); skull(); ctx.fill();
+
+  // Ухо — уже поверх лица, со своей обводкой: в профиль оно ближе к затылку.
   ctx.beginPath();
-  ctx.ellipse(hx, hy + CH_BEARD_DY * h, CH_BEARD_RX * h, CH_BEARD_RY * h,
-              0, 0, 6.2832);
-  fillStroke(PALETTE.beard, lw);
+  ctx.ellipse(hx + CH_EAR.x * h, hy + CH_EAR.y * h,
+              CH_EAR_RX * h, CH_EAR_RY * h, 0, 0, 6.2832);
+  fillStroke(PALETTE.skin, Math.max(2, lw * 0.7));
 
+  drawBeard(hx, hy, h, lw);
+
+  // Шапка-бини: скруглённый купол и отворот на тон светлее.
   ctx.beginPath();
   ctx.arc(hx, hy - hr * CH_BROW_A, hr * 1.02, Math.PI * 1.02, Math.PI * 2.08);
   ctx.closePath();
   fillStroke(PALETTE.hair, lw);
+  const cuffY = hy - hr * CH_BROW_A;
+  roundRect(hx - hr * 1.02, cuffY - CH_CAP_CUFF * h * 0.5,
+            hr * 2.04, CH_CAP_CUFF * h, CH_CAP_CUFF * h * 0.5);
+  fillStroke(PALETTE.hairCuff, lw);
+
+  // Бровь и глаз.
+  ctx.save();
+  ctx.translate(hx + CH_BROW.x * h, hy + CH_BROW.y * h);
+  ctx.rotate(CH_BROW.a);
+  roundRect(-CH_BROW.w * h / 2, -CH_BROW.h * h / 2,
+            CH_BROW.w * h, CH_BROW.h * h, CH_BROW.h * h * 0.5);
+  fillStroke(PALETTE.hair, Math.max(2, lw * 0.6));
+  ctx.restore();
 
   ctx.fillStyle = tinted(PALETTE.outline);
   if (p.stun > 0) {   // на ошеломлении глаз — чёрточка
@@ -1280,19 +1457,25 @@ function drawLumberjack(p, box) {
     circlePath(hx + CH_EYE.x * h, hy + CH_EYE.y * h, CH_EYE_R * h);
     ctx.fill();
   }
+}
 
-  // Кисть и топор поверх фигуры: топор развёрнут по позе.
-  ctx.save();
-  ctx.translate(hand.x, hand.y);
-  ctx.rotate(pose.axe);
-  if (pose.strike) drawAxeStrike(strikeAxeLen(h), h * AXE_LEN, lw);
-  else             drawAxeShape(h * AXE_LEN, lw);
-  ctx.restore();
-
-  circlePath(hand.x, hand.y, CH_ARM_TH * h * 0.62);
-  fillStroke(PALETTE.skin, lw);
-
-  ctx.restore();
+/** Борода: гладкий верх по скулам и волнистый нижний край. */
+function drawBeard(hx, hy, h, lw) {
+  const bx = hx, by = hy + CH_BEARD_DY * h;
+  const rx = CH_BEARD_RX * h, ry = CH_BEARD_RY * h;
+  const N = 32;
+  ctx.beginPath();
+  ctx.moveTo(bx - rx, by);
+  // Верх — плавная дуга по щекам.
+  ctx.quadraticCurveTo(bx, by - ry * 1.5, bx + rx, by);
+  // Низ — та же дуга, но радиус гуляет волной.
+  for (let i = 0; i <= N; i++) {
+    const t = Math.PI * (i / N);                 // 0 — правый край, π — левый
+    const k = 1 + CH_BEARD_WAVE * Math.sin(CH_BEARD_LOBES * 2 * t);
+    ctx.lineTo(bx + Math.cos(t) * rx, by + Math.sin(t) * ry * k);
+  }
+  ctx.closePath();
+  fillStroke(PALETTE.beard, lw);
 }
 
 /**
@@ -1353,7 +1536,14 @@ function drawParticles(p) {
     ctx.translate(q.x, q.y);
     ctx.rotate(q.rot);
 
-    if (q.kind === 'shard') {
+    if (q.kind === 'branch') {
+      // Ветка строится в координатах ствола, поэтому смещаем её так, чтобы
+      // центр кроны оказался в точке частицы — вокруг него и вращаем.
+      const c = crownCenter(0, 0, q.side, q.size);
+      ctx.translate(-c.x, -c.y);
+      drawBranchArm(0, 0, q.side, q.size);
+      drawBranchCrown(0, 0, q.side, q.size);
+    } else if (q.kind === 'shard') {
       const s = q.size;
       ctx.beginPath();
       ctx.moveTo( s * 0.55,  0);
@@ -1705,15 +1895,26 @@ function drawDifficulty() {
   drawTitle('Сложность', null);
 
   const bw = Math.min(W * 0.72, 420);
+  const n  = DIFFICULTY.length;
   const bh = Math.max(BTN_MIN_H, Math.min(H * 0.11, BTN_MAX_H));
-  const x = (W - bw) / 2;
-  let y = H * 0.34;
-  for (const d of DIFFICULTY) {
-    button(x, y, bw, bh, d.name, null,
-           () => { diff = d; startGame('bot'); }, d.id === diff.id);
-    y += bh + BTN_GAP;
-  }
-  button(x, y + 8, bw, BTN_MIN_H, 'Назад', null, () => { scene = 'menu'; }, false);
+  const top = H * 0.30, bottom = H * 0.94;
+
+  // Кнопки не мельче BTN_MIN_H: по ним попадают пальцем. Если в столбик они
+  // не влезают (низкий экран, альбомная ориентация) — раскладываем в два.
+  const rows = (cols) => Math.ceil(n / cols);
+  const need = (cols) => rows(cols) * bh + rows(cols) * BTN_GAP + BTN_MIN_H;
+  const cols = need(1) <= bottom - top ? 1 : 2;
+  const cw = cols === 1 ? bw : (bw - BTN_GAP) / 2;
+
+  const x0 = (W - bw) / 2;
+  let y = top;
+  DIFFICULTY.forEach((d, i) => {
+    const col = i % cols, row = (i / cols) | 0;
+    button(x0 + col * (cw + BTN_GAP), top + row * (bh + BTN_GAP), cw, bh,
+           d.name, null, () => { diff = d; startGame('bot'); }, d.id === diff.id);
+    y = top + (row + 1) * (bh + BTN_GAP);
+  });
+  button(x0, y, bw, BTN_MIN_H, 'Назад', null, () => { scene = 'menu'; }, false);
 }
 
 function drawGameOver() {
