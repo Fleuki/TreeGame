@@ -49,13 +49,17 @@ const PALETTE = {
 
   // Ветка красится этим же цветом — отдельной константы у неё нет.
   trunk:       '#a06a3e',
+  trunkHi:     '#c98f5c',   // светлые штрихи-блики по стволу
+  trunkCap:    '#5ec93a',   // зелёная «шапка» на торцах ствола
 
   leaf:        '#5ec93a',
   leafDot:     '#ffc63d',
 
   skin:        '#f7d3a6',
   hair:        '#3a2a1d',
-  shirt:       '#ea5348',
+  beard:       '#8a5a2e',
+  shirtRed:    '#ea5348',   // игрок 1
+  shirtBlue:   '#3f7fd0',   // игрок 2 и бот
   pants:       '#3f5f8f',
   boots:       '#2c2620',
   axeHandle:   '#c08b4a',
@@ -93,20 +97,81 @@ const TAP_FLASH    = 0.10;    // сек. подсветки половины з�
 
 const DEG = Math.PI / 180;
 
-/* --- Спрайты персонажа: размеры и точки привязки (доли, не пиксели) --- */
-const SPRITE_H     = 0.22;    // высота персонажа — доля высоты зоны
-const SPRITE_GAP   = 0.25;    // отступ от ствола — доля ширины спрайта
-const AXE_LEN      = 0.62;    // длина топора — доля высоты персонажа
-const HAND_PT      = { x: 0.85, y: 0.53 };  // кисть на спрайте персонажа
-const AXE_PIVOT    = { x: 0.03, y: 0.28 };  // торец рукояти на спрайте топора
-const AXE_EDGE     = { x: 0.86, y: 0.80 };  // лезвие — отсюда летят щепки
+/* --- Ствол: блики и торцы (доли ширины/высоты ствола) --- */
+const TRUNK_ROUND   = 0.30;   // скругление углов — доля ширины ствола
+const TRUNK_HI_A    = 0.30;   // прозрачность светлых штрихов
+const TRUNK_HI_W    = 0.17;   // ширина штриха — доля ширины ствола
+// Редкие блики: x — смещение от оси (доля ширины), y — доля высоты ствола
+// сверху вниз, h — длина штриха (доля высоты ствола).
+const TRUNK_HILITES = [
+  { x: -0.22, y: 0.10, h: 0.15 },
+  { x:  0.21, y: 0.44, h: 0.11 },
+  { x: -0.13, y: 0.74, h: 0.13 }
+];
+const TRUNK_CAP_H   = 0.34;   // высота «шапки»-среза на торце — доля ширины
+const TRUNK_CAP_IN  = 0.06;   // насколько шапка уже ствола — доля ширины
+
+/* --- Ветка: доли L.branchLen, L.leafR, L.trunkW, L.crownR* --- */
+const BR_BEND       = 0.62;   // вынос контрольной точки дуги вбок
+const BR_RISE       = 0.40;   // подъём конца дуги
+const BR_W0         = 0.62;   // толщина у ствола — доля leafR
+const BR_W1         = 0.40;   // толщина на конце — доля leafR
+const BR_HOOK       = 0.62;   // «крючок» за ствол — доля ширины ствола
+const BR_HOOK_DROP  = 0.16;   // наклон крючка вниз — доля ширины ствола
+const BR_HOOK_TH    = 0.42;   // толщина крючка — доля leafR
+const CROWN_OFF     = 0.45;   // вынос центра кроны за конец дуги — доля rx
+const CROWN_DOT_R   = 0.20;   // радиус жёлтого блика — доля ry
+// Волнистый край кроны: две гармоники (частота, амплитуда, фаза).
+const CROWN_WAVE    = [ { n: 5, a: 0.08, ph: 0.6 }, { n: 8, a: 0.05, ph: 2.0 } ];
+
+/* --- Персонаж: все размеры — доли высоты фигуры h --- */
+const CHAR_H       = 0.22;    // высота фигуры — доля высоты зоны
+const CH_W         = 0.64;    // ширина коробки персонажа
+const CH_LINE      = 1.15;    // толщина обводки — доля L.line
+const CH_HEAD_R    = 0.21;    // крупная круглая голова
+const CH_HEAD_Y    = 0.72;    // центр головы над землёй
+const CH_HEAD_DX   = 0.03;    // голова чуть подана вперёд
+const CH_BROW_A    = 0.55;    // шапка сдвинута вверх — доля радиуса головы
+const CH_BEARD_RX  = 0.17;    // борода — приплюснутый овал
+const CH_BEARD_RY  = 0.12;
+const CH_BEARD_DY  = 0.17;    // борода ниже центра головы
+const CH_EYE_R     = 0.030;
+const CH_EYE       = { x: 0.10, y: -0.03 };  // глаз от центра головы
+const CH_BODY_W    = 0.46;    // короткое плотное тело
+const CH_BODY_H    = 0.32;
+const CH_BODY_R    = 0.13;    // скругление тела
+const CH_LEG_DX    = 0.11;    // ноги от оси
+const CH_LEG_W     = 0.16;
+const CH_LEG_H     = 0.19;
+const CH_BOOT_W    = 0.21;
+const CH_BOOT_H    = 0.06;
+const CH_ARM_TH    = 0.09;    // толщина руки
+const CH_ARM_FOLLOW= 0.35;    // насколько рука идёт за замахом топора
+const CH_SHOULDER  = { x: 0.10, y: 0.50 };   // плечо: от оси и над землёй
+const CH_HAND      = { x: 0.26, y: 0.45 };   // кисть в покое
+const CH_RED_MIX   = 0.55;    // доля красного в заливках на промахе
+
+/* --- Топор: доли длины топора (сама длина — доля высоты персонажа) --- */
+const AXE_LEN        = 0.50;  // длина топора — доля высоты персонажа
+const AXE_BUTT       = 0.20;  // хвост рукояти за кистью
+const AXE_HANDLE_TH  = 0.13;  // толщина рукояти
+const AXE_BLADE_L    = 0.34;  // длина лезвия вдоль топорища
+const AXE_BLADE_W0   = 0.22;  // полувысота у обуха
+const AXE_BLADE_W1   = 0.44;  // полувысота у режущей кромки
+const AXE_EDGE_BULGE = 0.10;  // выгиб режущей кромки наружу
+// На сколько лезвие входит в ствол в момент удара — доля высоты фигуры.
+// Из неё выводится, где стоит персонаж (см. charBox).
+const AXE_BITE       = 0.10;
 
 /* --- Анимация удара --- */
 const CHOP_WINDUP_T = 0.06;   // сек. замаха
 const CHOP_STRIKE_T = 0.05;   // сек. удара
 const CHOP_RETURN_T = 0.12;   // сек. возврата
-const AXE_WINDUP_A  = -45 * DEG;   // угол замаха
-const AXE_STRIKE_A  =  25 * DEG;   // угол в момент контакта
+const AXE_IDLE_A    = -30 * DEG;   // топор на плече в покое
+const AXE_WINDUP_A  = -78 * DEG;   // угол замаха
+// В момент контакта топорище почти горизонтально: плоскость лезвия ложится
+// на ствол и входит в него, а не бьёт рукоятью.
+const AXE_STRIKE_A  =   6 * DEG;
 const BODY_LEAN_A   =   6 * DEG;   // наклон корпуса вперёд на ударе
 
 /* --- Промах --- */
@@ -170,7 +235,7 @@ function makePlayer(index, isBot) {
     knock: 0,            // отлёт персонажа назад на промахе
     tapFlash: 0,         // подсветка половины зоны под пальцем
     tapSide: LEFT,       // какую половину подсветить
-    sprite: index === 0 ? 'red' : 'blue',   // какой спрайт лесоруба
+    shirt: index === 0 ? 'shirtRed' : 'shirtBlue',  // цвет рубашки в PALETTE
     chipPending: false,  // щепки ждут момента контакта лезвия
     scorePop: 0,         // pop-анимация счётчика
     particles: [],
@@ -178,28 +243,6 @@ function makePlayer(index, isBot) {
   };
 }
 let players = [makePlayer(0, false), makePlayer(1, true)];
-
-
-/* =========================================================================
-   3b. СПРАЙТЫ — грузятся асинхронно. Пока их нет (или если файлы не
-   отдались), персонаж рисуется примитивами, игра не ломается.
-   ========================================================================= */
-const Sprites = (function () {
-  const src = {
-    red:  'assets/lumberjack-red.png',
-    blue: 'assets/lumberjack-blue.png',
-    axe:  'assets/axe.png'
-  };
-  const img = {};
-  for (const k in src) { img[k] = new Image(); img[k].src = src[k]; }
-
-  const done = im => im && im.complete && im.naturalWidth > 0;
-  return {
-    get: k => (done(img[k]) ? img[k] : null),
-    // Персонажа рисуем спрайтами только когда готовы и фигура, и топор.
-    ready: k => done(img[k]) && done(img.axe)
-  };
-})();
 
 
 /* =========================================================================
@@ -383,8 +426,8 @@ function computeLayout() {
     // друг на друга: у каждой своя обводка, и они читаются как две.
     crownRx: leafR * 1.35,
     crownRy: leafR * 1.02,
-    // Персонаж: высота — доля высоты зоны (см. SPRITE_H).
-    charH: zh * SPRITE_H,
+    // Персонаж: высота — доля высоты зоны (см. CHAR_H).
+    charH: zh * CHAR_H,
     scoreSize,
     nameSize: Math.max(11, Math.round(scoreSize * 0.38)),
     visible: Math.ceil(baseY / segH) + 1
@@ -665,7 +708,7 @@ function updateBot(p, dt) {
 
 
 /* =========================================================================
-   10. ОТРИСОВКА — примитивы; заменяются на арт без правок логики.
+   10. ОТРИСОВКА — всё фигурами на канве: цвета из PALETTE, размеры из констант.
    ========================================================================= */
 function roundRect(x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
@@ -690,7 +733,7 @@ function setOutline(w) {
 
 /** Заливает текущий путь и обводит его чёрным. */
 function fillStroke(color, w) {
-  ctx.fillStyle = color;
+  ctx.fillStyle = tinted(color);
   ctx.fill();
   setOutline(w);
   ctx.stroke();
@@ -706,7 +749,7 @@ function outlinedBar(x0, y0, x1, y1, th, color) {
   ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
   setOutline(th + L.line * 2);
   ctx.stroke();
-  ctx.strokeStyle = color;
+  ctx.strokeStyle = tinted(color);
   ctx.lineWidth = th;
   ctx.stroke();
 }
@@ -758,13 +801,41 @@ function drawGround() {
 }
 
 /**
- * Ствол — один ровный прямоугольник со скруглёнными торцами и обводкой,
- * без полос и сучков. Сегменты остаются только в логике; ход рубки
- * читается по тому, как съезжают вниз ветки.
+ * Ствол — ровный прямоугольник со скруглёнными торцами и обводкой.
+ * Поверх: редкие светлые полупрозрачные штрихи (лёгкий объём, не текстура)
+ * и зелёные «шапки»-срезы на верхнем и нижнем торце.
+ * Сегменты остаются только в логике; ход рубки читается по веткам.
  */
 function drawTrunk(cx, topY, botY, w) {
-  roundRect(cx - w / 2, topY, w, botY - topY, w * 0.30);
+  const h = botY - topY;
+
+  roundRect(cx - w / 2, topY, w, h, w * TRUNK_ROUND);
   fillStroke(PALETTE.trunk);
+
+  // Штрихи-блики: мягкие скруглённые пятна светлее ствола, вразброс.
+  ctx.save();
+  ctx.clip();                                  // не вылезают за контур ствола
+  ctx.globalAlpha = TRUNK_HI_A;
+  ctx.fillStyle = PALETTE.trunkHi;
+  const hw = w * TRUNK_HI_W;
+  for (const s of TRUNK_HILITES) {
+    const hh = Math.max(hw, h * s.h);
+    roundRect(cx + s.x * w - hw / 2, topY + s.y * h, hw, hh, hw / 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Основание: зелёный срез на верхнем и нижнем торце.
+  trunkCap(cx, topY, w);
+  trunkCap(cx, botY, w);
+}
+
+/** Зелёный срез на торце ствола: приплюснутая скруглённая шапка с обводкой. */
+function trunkCap(cx, y, w) {
+  const cw = w - w * TRUNK_CAP_IN * 2;
+  const ch = w * TRUNK_CAP_H;
+  roundRect(cx - cw / 2, y - ch / 2, cw, ch, ch / 2);
+  fillStroke(PALETTE.trunkCap);
 }
 
 /**
@@ -787,8 +858,8 @@ function branchTip(cx, cy, dir, w) {
   return {
     x0, y0: cy,
     // Контрольная точка: от ствола уходит вбок, потом плавно вверх.
-    kx: x0 + dir * L.branchLen * 0.62, ky: cy,
-    x1: x0 + dir * L.branchLen, y1: cy - L.branchLen * 0.40
+    kx: x0 + dir * L.branchLen * BR_BEND, ky: cy,
+    x1: x0 + dir * L.branchLen, y1: cy - L.branchLen * BR_RISE
   };
 }
 
@@ -817,24 +888,42 @@ function taperedArcPath(a, w0, w1) {
   ctx.closePath();
 }
 
-/** Дуга ветки с наплывом у основания. Цвет — тот же, что у ствола. */
+/**
+ * Дуга ветки, наплыв у основания и короткий «крючок» — сегмент, заходящий
+ * на противоположную сторону ствола. Ветка рисуется ДО ствола, поэтому
+ * крючок читается как обхват: он выглядывает с другой стороны, а стык
+ * у основания прячется под заливкой и обводкой ствола.
+ * Цвет — тот же, что у ствола (PALETTE.trunk).
+ */
 function drawBranchArm(cx, cy, side, w, h) {
   const dir = side === LEFT ? -1 : 1;
   const a   = branchTip(cx, cy, dir, w);
-  const w0  = L.leafR * 0.62;              // у ствола толще
-  const w1  = L.leafR * 0.40;              // к концу тоньше
+  const w0  = L.leafR * BR_W0;             // у ствола толще
+  const w1  = L.leafR * BR_W1;             // к концу тоньше
   // Наплыв: сливается с контуром ствола, стык прячется под ним.
   const sx = a.x0 + dir * w0 * 0.15, sr = w0 * 0.78;
+  // Крючок: уходит за ось ствола на противоположную сторону и вниз.
+  const hx = cx - dir * w * BR_HOOK, hy = cy + w * BR_HOOK_DROP;
+  const hth = L.leafR * BR_HOOK_TH;
 
-  // Подложка обводки: обводим обе фигуры, потом заливаем — так силуэт
-  // получает одну общую обводку без шва между дугой и наплывом.
+  // Подложка обводки: обводим все три фигуры, потом заливаем — так силуэт
+  // получает одну общую обводку без швов между частями.
+  const paint = () => {
+    ctx.beginPath(); ctx.moveTo(sx, cy); ctx.lineTo(hx, hy);
+  };
   setOutline(L.line * 2);
   taperedArcPath(a, w0, w1); ctx.stroke();
   circlePath(sx, cy, sr);    ctx.stroke();
+  paint();
+  ctx.lineWidth = hth + L.line * 2;
+  ctx.stroke();
 
   ctx.fillStyle = PALETTE.trunk;
   taperedArcPath(a, w0, w1); ctx.fill();
   circlePath(sx, cy, sr);    ctx.fill();
+  ctx.strokeStyle = PALETTE.trunk;
+  ctx.lineWidth = hth;
+  paint(); ctx.stroke();
 }
 
 /** Крона: плоский зелёный овал с волнистым краем и смещённым бликом. */
@@ -842,17 +931,17 @@ function drawBranchCrown(cx, cy, side, w, h) {
   const dir = side === LEFT ? -1 : 1;
   const a   = branchTip(cx, cy, dir, w);
   const rx  = L.crownRx, ry = L.crownRy;
-  const fx  = a.x1 + dir * rx * 0.45;
+  const fx  = a.x1 + dir * rx * CROWN_OFF;
   const fy  = a.y1 - ry * 0.15;
 
   const N = 40;
   ctx.beginPath();
   for (let i = 0; i <= N; i++) {
     const ang = i / N * 6.2832;
-    // Две гармоники дают неровный край; dir разворачивает волну,
+    // Гармоники CROWN_WAVE дают неровный край; dir разворачивает волну,
     // чтобы левые и правые кроны не были клонами.
-    const k = 1 + 0.08 * Math.sin(5 * ang * dir + 0.6)
-                + 0.05 * Math.sin(8 * ang * dir + 2.0);
+    let k = 1;
+    for (const q of CROWN_WAVE) k += q.a * Math.sin(q.n * ang * dir + q.ph);
     const px = fx + Math.cos(ang) * rx * k;
     const py = fy + Math.sin(ang) * ry * k;
     if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
@@ -860,19 +949,37 @@ function drawBranchCrown(cx, cy, side, w, h) {
   ctx.closePath();
   fillStroke(PALETTE.leaf);
 
-  // Блик смещён от центра.
-  circlePath(fx - dir * rx * 0.26, fy - ry * 0.20, ry * 0.20);
+  // Жёлтая точка-блик, смещённая от центра.
+  circlePath(fx - dir * rx * 0.26, fy - ry * 0.20, ry * CROWN_DOT_R);
   fillStroke(PALETTE.leafDot, Math.max(3, L.line * 0.7));
 }
 
-/* ---------- Персонаж: спрайт плюс отдельный спрайт топора ---------- */
+/* ---------- Персонаж и топор: только фигуры, без спрайтов ---------- */
+
+/**
+ * Подмешивание красного в заливки персонажа на промахе. Ставится на время
+ * отрисовки фигуры и снимается сразу после: fillStroke и outlinedBar
+ * прогоняют цвет через tinted().
+ */
+let tintK = 0;
+
+function mixColor(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const m = (sh) => Math.round((((pa >> sh) & 255) * (1 - t) + ((pb >> sh) & 255) * t));
+  return 'rgb(' + m(16) + ',' + m(8) + ',' + m(0) + ')';
+}
+
+function tinted(color) {
+  return tintK > 0 ? mixColor(color, PALETTE.stunTint, tintK) : color;
+}
 
 /** Угол топора и наклон корпуса по таймеру удара. */
 function chopPose(chopT) {
-  if (chopT <= 0) return { axe: 0, lean: 0 };
+  if (chopT <= 0) return { axe: AXE_IDLE_A, lean: 0 };
   const t = CHOP_TIME - chopT;                 // прошло с начала удара
   if (t < CHOP_WINDUP_T) {                     // замах
-    return { axe: AXE_WINDUP_A * (t / CHOP_WINDUP_T), lean: 0 };
+    const k = t / CHOP_WINDUP_T;
+    return { axe: AXE_IDLE_A + (AXE_WINDUP_A - AXE_IDLE_A) * k, lean: 0 };
   }
   if (t < CHOP_HIT_T) {                        // удар, easeOutQuad
     const k = (t - CHOP_WINDUP_T) / CHOP_STRIKE_T;
@@ -882,7 +989,8 @@ function chopPose(chopT) {
   }
   const k = Math.min(1, (t - CHOP_HIT_T) / CHOP_RETURN_T);   // плавный возврат
   const e = k * k * (3 - 2 * k);
-  return { axe: AXE_STRIKE_A * (1 - e), lean: BODY_LEAN_A * (1 - e) };
+  return { axe: AXE_STRIKE_A + (AXE_IDLE_A - AXE_STRIKE_A) * e,
+           lean: BODY_LEAN_A * (1 - e) };
 }
 
 /** Отлёт персонажа от ствола на промахе: сразу назад и плавно обратно. */
@@ -892,105 +1000,158 @@ function knockOffset(p) {
     : 0;
 }
 
-/** Локальная геометрия персонажа: где он стоит и какого размера. */
-function charBox(p, cx) {
-  const im = Sprites.get(p.sprite);
-  const h  = L.charH;
-  const w  = im ? h * im.naturalWidth / im.naturalHeight : h * 0.65;
-  const away = p.side === LEFT ? -1 : 1;       // куда отлетать от ствола
-  const x = cx + away * (L.trunkW * 0.5 + w * SPRITE_GAP + knockOffset(p));
-  return { im, w, h, x, away, dir: -away };    // dir: +1 — спрайт смотрит вправо
+/** Вынос режущей кромки от кисти вдоль топорища. */
+function bladeReach(h) {
+  return h * AXE_LEN * (1 + AXE_EDGE_BULGE);
 }
 
 /**
- * Рисует персонажа с топором в контекст g. Координаты — локальные для зоны,
- * точка привязки — низ спрайта на уровне земли.
+ * Локальная геометрия персонажа: где он стоит и какого размера.
+ * Расстояние до ствола не задаётся отдельно, а выводится из длины топора:
+ * в момент удара (AXE_STRIKE_A) кромка заходит за поверхность ствола
+ * ровно на AXE_BITE — лезвие входит в дерево, рукоять остаётся снаружи.
  */
-function paintCharacter(g, p, box) {
-  const { im, w, h, x, dir } = box;
+function charBox(p, cx) {
+  const h = L.charH;
+  const w = h * CH_W;
+  const reach = CH_HAND.x * h + bladeReach(h) * Math.cos(AXE_STRIKE_A);
+  const away = p.side === LEFT ? -1 : 1;       // куда отлетать от ствола
+  const x = cx + away * (L.trunkW * 0.5 + reach - h * AXE_BITE + knockOffset(p));
+  return { w, h, x, away, dir: -away };        // dir: +1 — фигура смотрит вправо
+}
+
+/**
+ * Кисть в локальных координатах фигуры (ось у ног, +x — в сторону ствола).
+ * Рука частично идёт за замахом: кисть поворачивается вокруг плеча на
+ * CH_ARM_FOLLOW от угла топора.
+ */
+function handPoint(pose, h) {
+  const sx = CH_SHOULDER.x * h, sy = -CH_SHOULDER.y * h;
+  const dx = CH_HAND.x * h - sx, dy = -CH_HAND.y * h - sy;
+  const a = pose.axe * CH_ARM_FOLLOW, c = Math.cos(a), sn = Math.sin(a);
+  return { x: sx + dx * c - dy * sn, y: sy + dx * sn + dy * c, sx, sy };
+}
+
+/**
+ * Топор в координатах кисти: рукоять уходит в −x (от ствола), лезвие —
+ * в +x (к стволу). Фигура целиком зеркалится через scale(dir, 1), поэтому
+ * на правой стороне лезвие так же смотрит в ствол, а рукоять — наружу.
+ */
+function drawAxeShape(len, lw) {
+  const th  = len * AXE_HANDLE_TH;
+  const bx0 = len * (1 - AXE_BLADE_L);         // где начинается лезвие
+  const w0  = len * AXE_BLADE_W0, w1 = len * AXE_BLADE_W1;
+
+  // Скруглённая рукоять: от хвоста за кистью до основания лезвия.
+  roundRect(-len * AXE_BUTT, -th / 2, len * AXE_BUTT + bx0 + th, th, th / 2);
+  fillStroke(PALETTE.axeHandle, lw);
+
+  // Трапециевидное лезвие, режущая кромка чуть выгнута наружу.
+  ctx.beginPath();
+  ctx.moveTo(bx0, -w0);
+  ctx.lineTo(len, -w1);
+  ctx.quadraticCurveTo(len + len * AXE_EDGE_BULGE, 0, len, w1);
+  ctx.lineTo(bx0, w0);
+  ctx.closePath();
+  fillStroke(PALETTE.axeBlade, lw);
+}
+
+/**
+ * Лесоруб фигурами: крупная круглая голова с бородой, короткое плотное
+ * тело, толстая чёрная обводка. Цвет рубашки — из p.shirt.
+ * Точка привязки — низ фигуры на линии земли.
+ */
+function drawLumberjack(p, box) {
+  const { w, h, x, dir } = box;
   const pose = chopPose(p.chop);
   const tilt = p.knock > 0 ? -MISS_TILT_A * (p.knock / MISS_KNOCK_T) : 0;
   const wob  = p.stun > 0 ? Math.sin(clock * 38) * 0.05 : 0;
+  const lw   = Math.max(3, L.line * CH_LINE);
 
-  g.save();
-  g.translate(x, L.baseY);
-  g.scale(dir, 1);                    // правая сторона — зеркало
-  g.rotate(pose.lean + tilt + wob);   // поворот вокруг точки у ног
+  ctx.save();
+  ctx.translate(x, L.baseY);
+  ctx.scale(dir, 1);                  // правая сторона — зеркало
+  ctx.rotate(pose.lean + tilt + wob); // поворот вокруг точки у ног
 
-  g.drawImage(im, -w / 2, -h, w, h);
+  // Ноги и ботинки: ботинки шире ног, чтобы фигура твёрдо стояла.
+  for (const s of [-1, 1]) {
+    const lx = s * CH_LEG_DX * h;
+    roundRect(lx - CH_LEG_W * h / 2, -CH_LEG_H * h,
+              CH_LEG_W * h, CH_LEG_H * h, CH_LEG_W * h * 0.4);
+    fillStroke(PALETTE.pants, lw);
+    roundRect(lx - CH_BOOT_W * h * 0.4, -CH_BOOT_H * h,
+              CH_BOOT_W * h, CH_BOOT_H * h, CH_BOOT_H * h * 0.5);
+    fillStroke(PALETTE.boots, lw);
+  }
 
-  // Топор поверх персонажа, вращается вокруг торца рукояти у кисти.
-  const axe = Sprites.get('axe');
-  const aw  = h * AXE_LEN;
-  const ah  = aw * axe.naturalHeight / axe.naturalWidth;
-  g.save();
-  g.translate(-w / 2 + HAND_PT.x * w, -h + HAND_PT.y * h);
-  g.rotate(pose.axe);
-  g.drawImage(axe, -AXE_PIVOT.x * aw, -AXE_PIVOT.y * ah, aw, ah);
-  g.restore();
+  // Рука с топором — за корпусом, чтобы плечо не торчало поверх рубашки.
+  const hand = handPoint(pose, h);
+  outlinedBar(hand.sx, hand.sy, hand.x, hand.y, CH_ARM_TH * h, PALETTE.skin);
 
-  g.restore();
+  // Короткое плотное тело
+  roundRect(-CH_BODY_W * h / 2, -(CH_LEG_H + CH_BODY_H) * h,
+            CH_BODY_W * h, CH_BODY_H * h, CH_BODY_R * h);
+  fillStroke(PALETTE[p.shirt], lw);
+
+  // Голова, борода, шапка, глаз
+  const hx = CH_HEAD_DX * h, hy = -CH_HEAD_Y * h, hr = CH_HEAD_R * h;
+  circlePath(hx, hy, hr);
+  fillStroke(PALETTE.skin, lw);
+
+  ctx.beginPath();
+  ctx.ellipse(hx, hy + CH_BEARD_DY * h, CH_BEARD_RX * h, CH_BEARD_RY * h,
+              0, 0, 6.2832);
+  fillStroke(PALETTE.beard, lw);
+
+  ctx.beginPath();
+  ctx.arc(hx, hy - hr * CH_BROW_A, hr * 1.02, Math.PI * 1.02, Math.PI * 2.08);
+  ctx.closePath();
+  fillStroke(PALETTE.hair, lw);
+
+  ctx.fillStyle = tinted(PALETTE.outline);
+  if (p.stun > 0) {   // на ошеломлении глаз — чёрточка
+    roundRect(hx + CH_EYE.x * h - CH_EYE_R * h * 1.6, hy + CH_EYE.y * h,
+              CH_EYE_R * h * 3.2, CH_EYE_R * h * 0.9, CH_EYE_R * h * 0.45);
+    ctx.fill();
+  } else {
+    circlePath(hx + CH_EYE.x * h, hy + CH_EYE.y * h, CH_EYE_R * h);
+    ctx.fill();
+  }
+
+  // Кисть и топор поверх фигуры: топор вращается вокруг кисти.
+  ctx.save();
+  ctx.translate(hand.x, hand.y);
+  ctx.rotate(pose.axe);
+  drawAxeShape(h * AXE_LEN, lw);
+  ctx.restore();
+
+  circlePath(hand.x, hand.y, CH_ARM_TH * h * 0.62);
+  fillStroke(PALETTE.skin, lw);
+
+  ctx.restore();
 }
 
-/** Точка лезвия в координатах зоны — из неё летят щепки в момент контакта. */
+/**
+ * Точка кромки лезвия в координатах зоны — из неё летят щепки.
+ * Наклон корпуса на ударе мал, им пренебрегаем.
+ */
 function bladePoint(p, cx) {
-  const box = charBox(p, cx);
-  const axe = Sprites.get('axe');
-  if (!box.im || !axe) return { x: cx, y: L.baseY - L.segH * 0.55 };
-
-  const { w, h, x, dir } = box;
-  const aw = h * AXE_LEN, ah = aw * axe.naturalHeight / axe.naturalWidth;
-  const ang = chopPose(p.chop).axe;
-  const dx = (AXE_EDGE.x - AXE_PIVOT.x) * aw;
-  const dy = (AXE_EDGE.y - AXE_PIVOT.y) * ah;
-  const c = Math.cos(ang), sn = Math.sin(ang);
-  const lx = -w / 2 + HAND_PT.x * w + dx * c - dy * sn;
-  const ly = -h + HAND_PT.y * h + dx * sn + dy * c;
-  return { x: x + dir * lx, y: L.baseY + ly };
+  const box  = charBox(p, cx);
+  const pose = chopPose(p.chop);
+  const hand = handPoint(pose, box.h);
+  const r    = bladeReach(box.h);
+  const lx   = hand.x + r * Math.cos(pose.axe);
+  const ly   = hand.y + r * Math.sin(pose.axe);
+  return { x: box.x + box.dir * lx, y: L.baseY + ly };
 }
 
-// Отдельная поверхность для красной вспышки поверх спрайта: source-atop
-// на основном холсте закрасил бы и фон, поэтому красим персонажа отдельно.
-let fxCanvas = null, fxCtx = null;
-function fxSurface(w, h) {
-  if (!fxCanvas) {
-    fxCanvas = document.createElement('canvas');
-    fxCtx = fxCanvas.getContext('2d');
-  }
-  if (fxCanvas.width < w || fxCanvas.height < h) {
-    fxCanvas.width = Math.ceil(w); fxCanvas.height = Math.ceil(h);
-  }
-  fxCtx.setTransform(1, 0, 0, 1, 0, 0);
-  fxCtx.clearRect(0, 0, fxCanvas.width, fxCanvas.height);
-  return fxCtx;
-}
-
-/** Персонаж целиком: спрайт, топор, красная вспышка и значок ошеломления. */
+/** Персонаж целиком: фигура с топором, краснота промаха и значок ошеломления. */
 function drawCharacter(p, cx) {
   const box = charBox(p, cx);
 
-  if (!box.im || !Sprites.ready(p.sprite)) {
-    // Спрайты ещё не загрузились или не отдались — рисуем примитивами.
-    drawLumberjackShapes(box.x, L.baseY, p.side, p.chop, p.stun);
-  } else if (p.red > 0) {
-    // Красим персонажа на отдельной поверхности размером с его коробку.
-    const aw = box.h * AXE_LEN;
-    const bx = box.x - box.w / 2 - aw, by = L.baseY - box.h - aw * 0.5;
-    const bw = box.w + aw * 2,        bh = box.h + aw * 0.5 + box.h * 0.1;
-    const g = fxSurface(bw * DPR, bh * DPR);
-    g.setTransform(DPR, 0, 0, DPR, -bx * DPR, -by * DPR);
-    paintCharacter(g, p, box);
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.globalCompositeOperation = 'source-atop';
-    g.globalAlpha = p.red * 0.6;
-    g.fillStyle = PALETTE.stunTint;
-    g.fillRect(0, 0, bw * DPR, bh * DPR);
-    g.globalAlpha = 1;
-    g.globalCompositeOperation = 'source-over';
-    ctx.drawImage(fxCanvas, 0, 0, bw * DPR, bh * DPR, bx, by, bw, bh);
-  } else {
-    paintCharacter(ctx, p, box);
-  }
+  tintK = p.red > 0 ? Math.min(1, p.red) * CH_RED_MIX : 0;
+  drawLumberjack(p, box);
+  tintK = 0;
 
   if (p.stun > 0) drawStunMark(box.x, L.baseY - box.h, box.h, p.stun);
 }
@@ -1014,91 +1175,6 @@ function drawStunMark(x, topY, h, stunT) {
   ctx.strokeText('!', x, cy - h * 0.02);
   ctx.fillText('!', x, cy - h * 0.02);
   ctx.restore();
-}
-
-/**
- * Запасная отрисовка примитивами — пока спрайты не загрузились.
- * (x, baseY) — точка опоры, side — с какой стороны ствола стоит,
- * chopT — остаток анимации удара, stunT — остаток ошеломления.
- */
-function drawLumberjackShapes(x, baseY, side, chopT, stunT) {
-  const h    = L.charH;
-  const dir  = side === LEFT ? 1 : -1;     // куда смотрит (к стволу)
-  const prog = chopT > 0 ? 1 - chopT / CHOP_TIME : 1;   // 0 — замах, 1 — удар
-  const swing = chopT > 0
-    ? (prog < 0.35 ? -0.75 * (prog / 0.35)                    // замах назад
-                   : -0.75 + 1.70 * Math.pow((prog - 0.35) / 0.65, 0.6)) // удар
-    : 0.35;                                                    // покой
-  const wob = stunT > 0 ? Math.sin(clock * 38) * 0.16 : 0;
-
-  ctx.save();
-  ctx.translate(x, baseY);
-  ctx.scale(dir, 1);
-  ctx.rotate(wob);
-
-  // Фигура приземистая и широкая: узкие детали обводка в 4–6 px съедает.
-  const bodyW = h * 0.50;
-  const lw    = Math.max(4, L.line * 0.8);   // обводка персонажа чуть тоньше
-
-  // Ноги
-  roundRect(-bodyW * 0.42, -h * 0.24, bodyW * 0.34, h * 0.24, bodyW * 0.15);
-  fillStroke(PALETTE.pants, lw);
-  roundRect( bodyW * 0.08, -h * 0.24, bodyW * 0.34, h * 0.24, bodyW * 0.15);
-  fillStroke(PALETTE.pants, lw);
-  // Ботинки — шире ног, чтобы фигура стояла
-  roundRect(-bodyW * 0.48, -h * 0.09, bodyW * 0.44, h * 0.09, bodyW * 0.13);
-  fillStroke(PALETTE.boots, lw);
-  roundRect( bodyW * 0.04, -h * 0.09, bodyW * 0.44, h * 0.09, bodyW * 0.13);
-  fillStroke(PALETTE.boots, lw);
-
-  // Корпус, чуть подаётся вперёд на ударе
-  const lean = chopT > 0 ? 0.12 * Math.sin(prog * Math.PI) : 0;
-  ctx.save();
-  ctx.translate(0, -h * 0.24);
-  ctx.rotate(lean);
-
-  roundRect(-bodyW / 2, -h * 0.34, bodyW, h * 0.36, bodyW * 0.30);
-  fillStroke(PALETTE.shirt, lw);
-
-  // Голова
-  const headY = -h * 0.48, headR = h * 0.175;
-  circlePath(bodyW * 0.05, headY, headR);
-  fillStroke(PALETTE.skin, lw);
-
-  // Шапка
-  ctx.beginPath();
-  ctx.arc(bodyW * 0.05, headY - headR * 0.30, headR, Math.PI * 1.04, Math.PI * 2.06);
-  ctx.closePath();
-  fillStroke(PALETTE.hair, lw);
-
-  // Глаз
-  ctx.fillStyle = PALETTE.outline;
-  if (stunT > 0) {
-    roundRect(bodyW * 0.16, headY + headR * 0.02, headR * 0.42, headR * 0.12, headR * 0.06);
-    ctx.fill();
-  } else {
-    circlePath(bodyW * 0.22, headY + headR * 0.08, headR * 0.15);
-    ctx.fill();
-  }
-
-  // Рука с топором
-  ctx.save();
-  ctx.translate(bodyW * 0.16, -h * 0.20);
-  ctx.rotate(swing);
-  outlinedBar(0, 0, h * 0.12, 0, h * 0.085, PALETTE.skin);
-  outlinedBar(h * 0.08, 0, h * 0.38, 0, h * 0.07, PALETTE.axeHandle);
-  ctx.beginPath();
-  ctx.moveTo(h * 0.34, -h * 0.14);
-  ctx.lineTo(h * 0.52, -h * 0.06);
-  ctx.lineTo(h * 0.52,  h * 0.06);
-  ctx.lineTo(h * 0.34,  h * 0.14);
-  ctx.closePath();
-  fillStroke(PALETTE.axeBlade, lw);
-  ctx.restore();
-
-  ctx.restore(); // корпус
-  ctx.restore(); // персонаж
-
 }
 
 function drawParticles(p) {
