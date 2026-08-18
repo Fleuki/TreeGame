@@ -129,7 +129,9 @@ const CLOUD_ALPHA   = 0.30;   // облака — атмосфера, а не о
 /* --- Ветка: доли L.branchLen, L.leafR, L.trunkW, L.crownR* --- */
 const BR_BEND       = 0.62;   // вынос контрольной точки дуги вбок
 const BR_DIP        = 0.14;   // прогиб у ствола: сперва вниз, потом вверх
-const BR_RISE       = 1.70;   // подъём конца дуги — доля её длины
+const BR_LEN        = 1.00;   // длина дуги — доля высоты сегмента (стиль)
+const BR_RISE       = 0.55;   // подъём конца дуги — доля её длины
+const BRANCH_FIT    = 0.48;   // докуда крона дотягивается — доля ширины зоны
 const BR_W0         = 0.54;   // толщина у ствола — доля leafR
 const BR_W1         = 0.27;   // толщина на конце — доля leafR
 const BR_FLARE      = 2.4;    // как быстро утолщение у ствола сходит на нет
@@ -181,7 +183,7 @@ const CH_SHOULDER  = { x: 0.10, y: 0.50 };   // плечо: от оси и на�
 // который исчезает, — только x задаётся здесь.
 const CH_HAND_IDLE   = { x: 0.24, y: 0.38 };
 const CH_HAND_STRIKE = { x: 0.40 };
-const CH_HAND_LO     = 0.18;  // ниже этой доли h кисть не опускается
+const CH_HAND_LO     = 0.14;  // ниже этой доли h кисть не опускается
 const CH_HAND_HI     = 0.55;  // и выше не поднимается
 const CH_RED_MIX   = 0.55;    // доля красного в заливках на промахе
 
@@ -231,9 +233,11 @@ const AXE_FORE_L     = 0.48;  // длина головы с торца — до�
 const AXE_BITE       = 0.15;
 // От оси фигуры до поверхности ствола — доля высоты фигуры. Из этой величины
 // и AXE_BITE выводится длина топора в позе удара (см. strikeAxeLen).
-const CHAR_STAND     = 0.78;  // зазор до ствола — доля высоты фигуры
-const CHAR_CLEAR     = 0.10;  // запас между силуэтом и кроной — доля высоты фигуры
-const CH_SIDE        = 0.25;  // силуэт фигуры вбок от её оси — доля высоты
+const CHAR_STAND     = 0.68;  // зазор до ствола — доля высоты фигуры
+const CHAR_CLEAR     = 0.08;  // запас между силуэтом и кроной — доля высоты фигуры
+// Силуэт фигуры вбок от её оси — половина её коробки (CH_W): в покое туда же
+// попадает поднятый топор, поэтому считаем по коробке, а не по телу.
+const CH_SIDE        = CH_W / 2;
 
 /* --- Удар: не анимация, а вторая поза --- */
 const CHOP_HOLD     = 0.13;   // сек. удержания позы удара
@@ -508,7 +512,10 @@ function computeLayout() {
   const ground = Math.max(28, Math.min(zh * 0.13, 84));
   const baseY  = zh - ground;                      // линия земли внутри зоны
   const charH  = zh * CHAR_H;                      // высота фигуры
-  const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 6));
+  // Шаг сегмента задан так, чтобы в зону влезало 6–8 ряд(ов) ветвей: дуги
+  // высокие, между ветками пустой сегмент, и при крупном шаге на экране
+  // оставалось бы всего две ветки.
+  const segH   = Math.max(20, Math.min(zw * 0.26, (baseY - zh * 0.10) / 8));
   // Панель счёта компактная — она вспомогательная, поле важнее.
   const scoreSize = Math.round(Math.min(zw * 0.22, zh * 0.13, 68) / 1.5);
 
@@ -520,27 +527,31 @@ function computeLayout() {
   const trunkW = segH * (stacked ? 0.92 : 0.74);
 
   // Ветка — самый заметный объект: толстая «рука» и крупная крона.
-  // Крона приплюснута: по высоте она должна укладываться в один сегмент,
-  // иначе кроны соседних веток слипаются и не видно, где какая.
-  let branchLen = segH * 1.00;
-  let leafR     = segH * 0.45;
-  const maxReach = zw * 0.47 - trunkW / 2;
-  // 2.38 = вынос центра кроны (0.45) плюс её полуширина с гребнем волны,
-  // всё в долях leafR.
-  const reach    = branchLen + leafR * 2.19;
-  if (reach > maxReach) {
-    const k = maxReach / reach;
-    branchLen *= k;
-    leafR     *= k;
+  // Крона крупная, как в референсе, но не шире, чем позволяет узкая зона.
+  let leafR      = Math.min(segH * 0.72, zw * 0.075);
+  const crownRx0 = leafR * 1.35, crownHalf = crownRx0 * 1.05;
+  // Длина одна для всех ветвей, но не меньше той, при которой крона обходит
+  // силуэт персонажа: он стоит вплотную к стволу, а ветка нижнего сегмента
+  // сидит на высоте удара — значит, крона должна уйти дальше него.
+  const clearLen = charH * (CHAR_STAND + CH_SIDE + CHAR_CLEAR)
+                 + crownHalf - crownRx0 * CROWN_OFF;
+  // И не больше того, что влезает в зону.
+  const fitLen = zw * BRANCH_FIT - trunkW / 2 - crownRx0 * CROWN_OFF - crownHalf;
+  let branchLen = Math.min(Math.max(segH * BR_LEN, clearLen), fitLen);
+  if (branchLen < segH * 0.6) {                 // совсем узкая зона
+    branchLen = segH * 0.6;
+    leafR     = Math.max(leafR * 0.7, segH * 0.35);
   }
 
   const crownRx = leafR * 1.35, crownRy = leafR * 1.02;
-  // Подъём дуги: у всех веток одинаковый, но не меньше того, при котором крона
-  // поднимается выше головы персонажа. Он стоит вплотную к стволу, и ветка
-  // нижнего сегмента сидит на высоте удара — только за счёт подъёма её крона
-  // проходит над фигурой, а не по ней.
+  // Подъём дуги — стилевой, одинаковый у всех ветвей. Если длины не хватило,
+  // чтобы обойти персонажа (узкая зона), подъём добирает остальное и крона
+  // проходит над головой.
+  const clears = branchLen + crownRx * CROWN_OFF - crownRx * 1.05
+               >= charH * (CHAR_STAND + CH_SIDE);
   const overHead = charH * (0.94 + CHAR_CLEAR) - segH / 2 + crownRy * 0.90;
-  const branchRise = Math.max(branchLen * BR_RISE, overHead);
+  const branchRise = clears ? branchLen * BR_RISE
+                            : Math.max(branchLen * BR_RISE, overHead);
 
   L = {
     stacked,
