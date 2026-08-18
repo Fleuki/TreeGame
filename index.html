@@ -1686,53 +1686,56 @@ function drawParticles(p) {
  * под ними полоска прогресса до WIN_SCORE. Игровое поле остаётся чистым.
  */
 /**
- * Счёт прижат к внешнему краю зоны — к низу локальных координат. У нижнего
- * игрока это низ экрана, у верхнего (зона развёрнута) — верх. Поле в середине
- * экрана остаётся свободным.
+ * Счётчик — один на двоих, как на референсе: плашка сидит на самой линии
+ * раздела и повёрнута вдоль неё, поэтому никому не достаётся вверх ногами.
+ * Цифра каждого игрока в цвете его рубахи и с его стороны от точки: у
+ * нижнего — снизу, у верхнего — сверху. Часть плашки уходит за край экрана,
+ * чтобы она не лезла в поле.
  */
-function drawScore(p) {
-  const m  = Math.max(12, L.zw * 0.045);
-  const sz = L.scoreSize;
-  const x = m;
-
+function drawScoreBoard() {
+  if (!players || players.length < 2) return;
+  const sz  = Math.round(L.scoreSize * 0.8);
+  const dot = ' • ';
   ctx.font = 'bold ' + sz + 'px system-ui, -apple-system, sans-serif';
-  const tw = ctx.measureText(String(p.score)).width;
-  const pw = Math.max(sz * 1.5, tw + sz * 0.7);
-  const ph = sz * 1.18;
-  const bh = Math.max(7, L.line * 1.4);
+  // players[0] — нижний (в «стопке») или левый игрок: его цифра идёт первой.
+  const s = players.map(p => String(p.score));
+  const w0 = ctx.measureText(s[0]).width;
+  const wd = ctx.measureText(dot).width;
+  const w1 = ctx.measureText(s[1]).width;
+  const tw = w0 + wd + w1;
+  const pw = tw + sz * 0.9, ph = sz * 1.3;
 
-  const blockH = L.nameSize * 1.3 + ph + bh * 1.1 + bh;
-  const y0 = L.zh - m - blockH;
-
-  // Имя — мелко, над плашкой.
-  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  ctx.fillStyle = PALETTE.text;
-  ctx.font = '700 ' + L.nameSize + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(p.name, x + L.line, y0);
-
-  // Счёт — крупно на белой плашке: читается и поверх листвы.
-  const py = y0 + L.nameSize * 1.3;
-  const pop = 1 + p.scorePop * 0.22;
   ctx.save();
-  ctx.translate(x, py);
-  ctx.scale(pop, pop);
-  roundRect(0, 0, pw, ph, ph * 0.32);
-  fillStroke(p.scorePop > 0.5 ? PALETTE.accent : PALETTE.white);
-  ctx.fillStyle = PALETTE.text;
+  if (L.stacked) {
+    // Линия раздела горизонтальная: текст пускаем вдоль неё снизу вверх —
+    // первая цифра оказывается у нижнего игрока, вторая у верхнего.
+    ctx.translate(ph * 0.45, L.zh);
+    ctx.rotate(-Math.PI / 2);
+  } else {
+    // Зоны рядом — оба сидят ровно, плашку кладём на верх разделителя.
+    ctx.translate(L.zw, ph * 0.65);
+  }
+
+  roundRect(-pw / 2, -ph / 2, pw, ph, ph / 2);
+  fillStroke(PALETTE.white, Math.max(4, L.line));
+
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.font = 'bold ' + sz + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText(String(p.score), pw / 2, ph * 0.54);
-  ctx.restore();
-
-  // Полоска прогресса до WIN_SCORE
-  const by = py + ph + bh * 1.1;
-  roundRect(x, by, pw, bh, bh / 2);
-  fillStroke(PALETTE.white, Math.max(3, L.line * 0.55));
-  const done = pw * Math.min(1, p.score / WIN_SCORE);
-  if (done > bh) {
-    roundRect(x, by, done, bh, bh / 2);
-    fillStroke(PALETTE.accent, Math.max(3, L.line * 0.55));
+  const colors = [PALETTE.shirtRed, PALETTE.shirtBlue];
+  const mids = [-tw / 2 + w0 / 2, tw / 2 - w1 / 2];
+  for (let i = 0; i < 2; i++) {
+    // Своя цифра подпрыгивает на очке — так видно, кому оно ушло.
+    const pop = 1 + players[i].scorePop * 0.35;
+    ctx.save();
+    ctx.translate(mids[i], 0);
+    ctx.scale(pop, pop);
+    ctx.fillStyle = colors[i];
+    ctx.fillText(s[i], 0, sz * 0.05);
+    ctx.restore();
   }
+  ctx.fillStyle = PALETTE.textDim;
+  ctx.fillText(dot, mids[0] + w0 / 2 + wd / 2, sz * 0.05);
+  ctx.restore();
 }
 
 /** Полная отрисовка одной зоны в её локальных координатах (0..L.zw, 0..L.zh). */
@@ -1803,7 +1806,6 @@ function drawZone(p) {
       ctx.globalAlpha = 1;
     }
 
-    drawScore(p);
   });
 }
 
@@ -2057,14 +2059,16 @@ function drawGameOver() {
   }
 
   // Кнопки — одни на двоих, по центру экрана, до них дотягиваются оба.
-  // В «стопке» подписи двусторонние: верхний игрок сидит с другой стороны.
+  // Подпись одна: двусторонняя надпись на кнопке читается хуже, чем обычная,
+  // а что это за кнопки — понятно и с другой стороны телефона. Вверх ногами
+  // дублируется только итог («ПОБЕДА» / «ПОРАЖЕНИЕ») — он и есть главное.
   const bw = Math.min(W * 0.66, 380);
   const bh = Math.max(BTN_MIN_H, Math.min(H * 0.10, BTN_MAX_H));
   const x  = (W - bw) / 2;
   let y = L.stacked ? H / 2 - bh - BTN_GAP / 2 : H * 0.56;
-  button(x, y, bw, bh, 'Ещё раз', null, () => startGame(mode), true, L.stacked);
+  button(x, y, bw, bh, 'Ещё раз', null, () => startGame(mode), true);
   y += bh + BTN_GAP;
-  button(x, y, bw, bh, 'В меню', null, () => { scene = 'menu'; }, false, L.stacked);
+  button(x, y, bw, bh, 'В меню', null, () => { scene = 'menu'; }, false);
 }
 
 function render() {
@@ -2075,6 +2079,7 @@ function render() {
   drawBackground();
   for (const p of players) drawZone(p);
   drawDivider();
+  drawScoreBoard();
   drawCountdown();
 }
 
