@@ -166,12 +166,15 @@ const CH_RED_MIX   = 0.55;    // доля красного в заливках �
 const AXE_LEN        = 0.56;  // длина топора — доля высоты персонажа
 const AXE_BUTT       = 0.20;  // хвост рукояти за кистью
 const AXE_HANDLE_TH  = 0.115;  // толщина рукояти
-const AXE_BLADE_L    = 0.46;  // длина лезвия вдоль топорища
-const AXE_BLADE_BACK = 0.20;  // полувысота у обуха — узкая сторона
-const AXE_BLADE_EDGE = 0.50;  // вынос кромки в длинную сторону
-const AXE_BLADE_TOP  = 0.30;  // вынос кромки в короткую сторону
-const AXE_BEARD      = { x: 0.35, y: 0.60 };  // борода: длинная сторона уходит назад
-const AXE_EDGE_BULGE = 0.06;  // лёгкий выгиб режущей кромки наружу
+// Голова сидит поперёк топорища: узкий обух за древком и широкий веер к
+// длинной, чуть выгнутой режущей кромке. Всё — доли длины топора.
+const AXE_HEAD_POS   = 0.86;  // где на топорище сидит голова
+const AXE_HEAD_BUTT  = 0.15;  // вылет обуха за древко
+const AXE_HEAD_W     = 0.50;  // вынос головы в сторону кромки
+const AXE_HEAD_BH    = 0.14;  // полувысота у обуха, вдоль топорища
+const AXE_HEAD_UP    = 0.38;  // вылет кромки к верху топорища
+const AXE_HEAD_DN    = 0.32;  // вылет кромки к рукояти
+const AXE_HEAD_BULGE = 0.07;  // выгиб кромки наружу
 // Поза удара: топорище смотрит от зрителя в дерево, поэтому топор виден
 // сильно укороченным — почти горизонтальной чертой, лезвие уходит в ствол.
 const AXE_FORE_BACK  = 0.17;  // полувысота лезвия с торца у обуха
@@ -1061,23 +1064,23 @@ function handPoint(pose, h) {
  * поэтому на правой стороне лезвие так же смотрит в ствол.
  */
 function drawAxeShape(len, lw) {
-  const th  = len * AXE_HANDLE_TH;
-  const bx0 = len * (1 - AXE_BLADE_L);         // где начинается голова
-  const bk  = len * AXE_BLADE_BACK;            // узкая сторона, обух
-  const ed  = len * AXE_BLADE_EDGE;            // длинный вылет кромки
+  const th = len * AXE_HANDLE_TH;
+  const c  = len * AXE_HEAD_POS;               // голова на топорище
+  const bh = len * AXE_HEAD_BH, bt = len * AXE_HEAD_BUTT;
+  const wd = len * AXE_HEAD_W;
+  const up = len * AXE_HEAD_UP, dn = len * AXE_HEAD_DN;
 
-  // Скруглённая рукоять: от хвоста за кистью до основания головы.
-  roundRect(-len * AXE_BUTT, -th / 2, len * AXE_BUTT + bx0 + th, th, th / 2);
+  // Скруглённое топорище во всю длину: верх уйдёт под голову.
+  roundRect(-len * AXE_BUTT, -th / 2, len * AXE_BUTT + len, th, th / 2);
   fillStroke(PALETTE.axeHandle, lw);
 
-  // Профиль головы: узкий обух, длинная режущая кромка с лёгким выгибом и
-  // борода — длинная сторона уходит назад к рукояти.
+  // Голова поперёк топорища: обух за древком, дальше веер к кромке.
   ctx.beginPath();
-  ctx.moveTo(bx0, -bk);
-  ctx.lineTo(len, -len * AXE_BLADE_TOP);
-  ctx.quadraticCurveTo(len + len * AXE_EDGE_BULGE, ed * 0.3, len, ed);
-  ctx.lineTo(bx0 + (len - bx0) * AXE_BEARD.x, ed * AXE_BEARD.y);
-  ctx.lineTo(bx0,  bk);
+  ctx.moveTo(c + bh, -bt);
+  ctx.lineTo(c + up,  wd);
+  // Кромка — длинная и чуть выгнутая наружу.
+  ctx.quadraticCurveTo(c + (up - dn) / 2, wd + len * AXE_HEAD_BULGE, c - dn, wd);
+  ctx.lineTo(c - bh, -bt);
   ctx.closePath();
   fillStroke(PALETTE.axeBlade, lw);
 }
