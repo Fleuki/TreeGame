@@ -121,7 +121,8 @@ workflow включает Pages сам (`configure-pages` с `enablement: true`)
   игрок решает, куда бить.
 
 Менять арт удобно в двух местах: цвета — в `PALETTE` вверху файла,
-формы — в `drawTrunk`, `drawBranch`, `drawLumberjack`, `drawGround`.
+формы — в `drawTrunk`, `drawBranchArm`, `drawBranchCrown`, `drawLumberjack`,
+`drawGround`.
 Логики они не касаются.
 
 ## Ощущение
