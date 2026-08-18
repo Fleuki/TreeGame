@@ -91,7 +91,6 @@ const PALETTE = {
   btn:         '#ffffff',
   btnHi:       '#ffc63d',
 
-  flash:       '#ffffff',
   stunTint:    '#ff4a3d'
 };
 
@@ -107,7 +106,6 @@ const SHAKE_MAG    = 3.5;     // px тряски от удара
 const STUN_SHAKE_T = 0.30;    // сек. тряски от ошеломления
 const STUN_SHAKE   = 8.0;     // px тряски от ошеломления
 const RED_TIME     = 0.25;    // сек. красной заливки зоны на промахе
-const TAP_FLASH    = 0.10;    // сек. подсветки половины зоны под пальцем
 
 const DEG = Math.PI / 180;
 
@@ -330,11 +328,8 @@ function makePlayer(index, isBot) {
     stun: 0,             // таймер ошеломления
     trunkAnim: 0,        // 1 → 0, твин опускания ствола
     shake: 0, shakeDur: SHAKE_TIME, shakeMag: 0,
-    flash: 0,            // белая вспышка удара
     red: 0,              // красная заливка зоны на промахе
     knock: 0,            // отлёт персонажа назад на промахе
-    tapFlash: 0,         // подсветка половины зоны под пальцем
-    tapSide: LEFT,       // какую половину подсветить
     shirt:     index === 0 ? 'shirtRed'     : 'shirtBlue',      // цвет рубашки
     shirtDark: index === 0 ? 'shirtRedDark' : 'shirtBlueDark',  // её детали
     chipPending: false,  // щепки ждут момента контакта лезвия
@@ -661,10 +656,6 @@ function chopAttempt(p, side) {
   // Первый же удар — подсказки больше не нужны.
   if (tutorial > 0) { tutorial = 0; markTutorialSeen(); }
 
-  // Подсветка половины зоны — отклик на само касание, до всех проверок,
-  // чтобы игрок видел выбранную сторону даже когда тап пропал впустую.
-  if (!p.isBot) { p.tapFlash = TAP_FLASH; p.tapSide = side; }
-
   if (p.stun > 0) return;                     // ошеломлён — тапы игнорируются
 
   p.side = side;
@@ -690,7 +681,6 @@ function chopAttempt(p, side) {
   p.score++;
   p.scorePop = 1;
   p.shake = SHAKE_TIME; p.shakeDur = SHAKE_TIME; p.shakeMag = SHAKE_MAG;
-  p.flash = 1;
   p.chipPending = true;        // щепки полетят в момент контакта лезвия
   Sound.chop(p.score / WIN_SCORE);
 
@@ -837,10 +827,8 @@ function update(dt) {
     }
     if (p.stun > 0)      p.stun = Math.max(0, p.stun - dt);
     if (p.shake > 0)     p.shake = Math.max(0, p.shake - dt);
-    if (p.flash > 0)     p.flash = Math.max(0, p.flash - dt * 7);
     if (p.red > 0)       p.red = Math.max(0, p.red - dt / RED_TIME);
     if (p.knock > 0)     p.knock = Math.max(0, p.knock - dt);
-    if (p.tapFlash > 0)  p.tapFlash = Math.max(0, p.tapFlash - dt);
     if (p.scorePop > 0)  p.scorePop = Math.max(0, p.scorePop - dt * 5);
     if (p.trunkAnim > 0) p.trunkAnim = Math.max(0, p.trunkAnim - dt / TRUNK_TWEEN);
 
@@ -1681,21 +1669,8 @@ function drawZone(p) {
     if (tutorial > 0 && scene === 'play') drawTutorial(p, cx, slide);
     ctx.restore(); // тряска
 
-    // Подсветка половины зоны под пальцем — видно, какую сторону выбрал
-    if (p.tapFlash > 0) {
-      ctx.globalAlpha = (p.tapFlash / TAP_FLASH) * 0.28;
-      ctx.fillStyle = PALETTE.white;
-      ctx.fillRect(p.tapSide === LEFT ? 0 : L.zw / 2, 0, L.zw / 2, L.zh);
-      ctx.globalAlpha = 1;
-    }
-
-    // Вспышка удара
-    if (p.flash > 0) {
-      ctx.globalAlpha = p.flash * 0.16;
-      ctx.fillStyle = PALETTE.flash;
-      ctx.fillRect(0, 0, L.zw, L.zh);
-      ctx.globalAlpha = 1;
-    }
+    // Белых заливок на тап и на удар нет: отклик даёт сама фигура, щепки и
+    // тряска, а засветка всей зоны перебивала их и слепила на каждом ударе.
     // Промах: вся зона краснеет коротко и резко
     if (p.red > 0) {
       ctx.globalAlpha = p.red * 0.5;
