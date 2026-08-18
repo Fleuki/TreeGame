@@ -110,19 +110,31 @@ const TRUNK_HILITES = [
 ];
 const TRUNK_CAP_H   = 0.34;   // высота «шапки»-среза на торце — доля ширины
 const TRUNK_CAP_IN  = 0.06;   // насколько шапка уже ствола — доля ширины
+// Основание у земли шире ствола — дерево «стоит», а не воткнуто.
+const TRUNK_BASE_W  = 1.36;   // ширина основания — доля ширины ствола
+const TRUNK_BASE_H  = 0.42;   // высота основания — доля ширины ствола
+const CLOUD_MIX     = 0.22;   // подмешивание неба в облако — лёгкая прозрачность
 
 /* --- Ветка: доли L.branchLen, L.leafR, L.trunkW, L.crownR* --- */
 const BR_BEND       = 0.62;   // вынос контрольной точки дуги вбок
-const BR_RISE       = 0.40;   // подъём конца дуги
-const BR_W0         = 0.62;   // толщина у ствола — доля leafR
-const BR_W1         = 0.40;   // толщина на конце — доля leafR
+const BR_DIP        = 0.14;   // прогиб у ствола: сперва вниз, потом вверх
+const BR_RISE       = 0.44;   // подъём конца дуги
+const BR_W0         = 0.50;   // толщина у ствола — доля leafR
+const BR_W1         = 0.36;   // толщина на конце — доля leafR
 const BR_HOOK       = 0.62;   // «крючок» за ствол — доля ширины ствола
 const BR_HOOK_DROP  = 0.16;   // наклон крючка вниз — доля ширины ствола
 const BR_HOOK_TH    = 0.42;   // толщина крючка — доля leafR
 const CROWN_OFF     = 0.45;   // вынос центра кроны за конец дуги — доля rx
 const CROWN_DOT_R   = 0.20;   // радиус жёлтого блика — доля ry
-// Волнистый край кроны: две гармоники (частота, амплитуда, фаза).
-const CROWN_WAVE    = [ { n: 5, a: 0.08, ph: 0.6 }, { n: 8, a: 0.05, ph: 2.0 } ];
+// Крона — облачко из пухлых долей: x, y и радиус в долях crownRx / crownRy.
+// Силуэт сперва обводится целиком, потом заливается, поэтому доли сливаются
+// в одну фигуру с общей обводкой, а края читаются как круглые бугры.
+const CROWN_PUFFS   = [
+  { x:  0.00, y: -0.35, r: 0.65 },
+  { x: -0.45, y:  0.18, r: 0.55 },
+  { x:  0.45, y:  0.18, r: 0.55 },
+  { x:  0.00, y:  0.30, r: 0.55 }
+];
 
 /* --- Персонаж: все размеры — доли высоты фигуры h --- */
 const CHAR_H       = 0.22;    // высота фигуры — доля высоты зоны
@@ -786,9 +798,14 @@ function drawClouds(p) {
       [ r * 0.74,  r * 0.20, r * 0.58],
       [-r * 0.08, -r * 0.44, r * 0.62]
     ];
-    ctx.fillStyle = PALETTE.outline;
+    // Лёгкая прозрачность сделана цветом, а не globalAlpha: два полупрозрачных
+    // слоя (подложка обводки и белый ком) наложились бы друг на друга и облако
+    // посерело бы. Вместо этого в оба цвета подмешивается небо на высоте облака.
+    const sky = mixColor(PALETTE.zoneSkyTop, PALETTE.zoneSkyLow,
+                         Math.max(0, Math.min(1, y / L.baseY)));
+    ctx.fillStyle = mixColor(PALETTE.outline, sky, CLOUD_MIX);
     for (const q of puffs) { circlePath(x + q[0], y + q[1], q[2] + lw); ctx.fill(); }
-    ctx.fillStyle = PALETTE.white;
+    ctx.fillStyle = mixColor(PALETTE.white, sky, CLOUD_MIX);
     for (const q of puffs) { circlePath(x + q[0], y + q[1], q[2]); ctx.fill(); }
   }
 }
@@ -825,15 +842,13 @@ function drawTrunk(cx, topY, botY, w) {
   }
   ctx.restore();
 
-  // Основание: зелёный срез на верхнем и нижнем торце.
-  trunkCap(cx, topY, w);
-  trunkCap(cx, botY, w);
+  // Торцы: сверху срез вровень со стволом, снизу — основание шире ствола.
+  trunkCap(cx, topY, w - w * TRUNK_CAP_IN * 2, w * TRUNK_CAP_H);
+  trunkCap(cx, botY, w * TRUNK_BASE_W,         w * TRUNK_BASE_H);
 }
 
-/** Зелёный срез на торце ствола: приплюснутая скруглённая шапка с обводкой. */
-function trunkCap(cx, y, w) {
-  const cw = w - w * TRUNK_CAP_IN * 2;
-  const ch = w * TRUNK_CAP_H;
+/** Зелёная скруглённая «шапка» на торце ствола: срез сверху, основание снизу. */
+function trunkCap(cx, y, cw, ch) {
   roundRect(cx - cw / 2, y - ch / 2, cw, ch, ch / 2);
   fillStroke(PALETTE.trunkCap);
 }
@@ -857,8 +872,9 @@ function branchTip(cx, cy, dir, w) {
   const x0 = cx + dir * (w / 2 - L.line);
   return {
     x0, y0: cy,
-    // Контрольная точка: от ствола уходит вбок, потом плавно вверх.
-    kx: x0 + dir * L.branchLen * BR_BEND, ky: cy,
+    // Контрольная точка ниже основания: ветка сперва слегка провисает,
+    // потом уходит вбок и вверх — тот самый изгиб, а не прямая палка.
+    kx: x0 + dir * L.branchLen * BR_BEND, ky: cy + L.branchLen * BR_DIP,
     x1: x0 + dir * L.branchLen, y1: cy - L.branchLen * BR_RISE
   };
 }
@@ -926,7 +942,12 @@ function drawBranchArm(cx, cy, side, w, h) {
   paint(); ctx.stroke();
 }
 
-/** Крона: плоский зелёный овал с волнистым краем и смещённым бликом. */
+/**
+ * Крона — зелёное «облачко»: несколько пухлых долей сливаются в одну фигуру.
+ * Сперва обводим все доли, потом заливаем — силуэт получает общую обводку
+ * без швов внутри, а край читается круглыми буграми. Сверху — жёлтый блик.
+ * dir разворачивает раскладку долей, чтобы левые и правые кроны не были клонами.
+ */
 function drawBranchCrown(cx, cy, side, w, h) {
   const dir = side === LEFT ? -1 : 1;
   const a   = branchTip(cx, cy, dir, w);
@@ -934,23 +955,18 @@ function drawBranchCrown(cx, cy, side, w, h) {
   const fx  = a.x1 + dir * rx * CROWN_OFF;
   const fy  = a.y1 - ry * 0.15;
 
-  const N = 40;
-  ctx.beginPath();
-  for (let i = 0; i <= N; i++) {
-    const ang = i / N * 6.2832;
-    // Гармоники CROWN_WAVE дают неровный край; dir разворачивает волну,
-    // чтобы левые и правые кроны не были клонами.
-    let k = 1;
-    for (const q of CROWN_WAVE) k += q.a * Math.sin(q.n * ang * dir + q.ph);
-    const px = fx + Math.cos(ang) * rx * k;
-    const py = fy + Math.sin(ang) * ry * k;
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  fillStroke(PALETTE.leaf);
+  const puff = (q) => {
+    ctx.beginPath();
+    ctx.ellipse(fx + dir * q.x * rx, fy + q.y * ry, q.r * rx, q.r * ry, 0, 0, 6.2832);
+  };
+
+  setOutline(L.line * 2);
+  for (const q of CROWN_PUFFS) { puff(q); ctx.stroke(); }
+  ctx.fillStyle = PALETTE.leaf;
+  for (const q of CROWN_PUFFS) { puff(q); ctx.fill(); }
 
   // Жёлтая точка-блик, смещённая от центра.
-  circlePath(fx - dir * rx * 0.26, fy - ry * 0.20, ry * CROWN_DOT_R);
+  circlePath(fx - dir * rx * 0.20, fy - ry * 0.22, ry * CROWN_DOT_R);
   fillStroke(PALETTE.leafDot, Math.max(3, L.line * 0.7));
 }
 
@@ -966,7 +982,7 @@ let tintK = 0;
 function mixColor(a, b, t) {
   const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
   const m = (sh) => Math.round((((pa >> sh) & 255) * (1 - t) + ((pb >> sh) & 255) * t));
-  return 'rgb(' + m(16) + ',' + m(8) + ',' + m(0) + ')';
+  return '#' + ((1 << 24) | (m(16) << 16) | (m(8) << 8) | m(0)).toString(16).slice(1);
 }
 
 function tinted(color) {
