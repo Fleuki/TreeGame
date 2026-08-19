@@ -302,6 +302,11 @@ const SAFE_START   = 2;       // первые сегменты — всегда 
 // blockedSide — по нему же целится бот и его же помечает крестик в подсказках.
 const HAZARD_SEG   = 1;       // ряд на высоте головы
 const MIN_TRUNK    = 14;      // минимум сегментов в памяти (дополняется под экран)
+// Мышь и клавиатура вместо пальцев: на ПК подсказки другие — там жмут клавиши,
+// а не тапают по половинам зоны. matchMedia честнее, чем ширина окна: узкое
+// окно браузера на ПК — всё равно ПК.
+const DESKTOP = !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches);
+
 const TUTORIAL_TIME = 3.0;    // сек. показа подсказок перед первым забегом
 const TUT_PULSE     = 6;      // рад/с пульсации кругов
 const TUT_R         = 0.11;   // радиус круга-подсказки — доля ширины зоны
@@ -1989,10 +1994,12 @@ function drawTutorial(p, cx, slide) {
   ctx.save();
   ctx.globalAlpha = a;
 
-  // Куда тапать: круг на каждой половине зоны.
+  // Куда тапать: круг на каждой половине зоны. На ПК в кругах стоят клавиши
+  // этого игрока — у левого A / D, у правого стрелки.
   const r = L.zw * TUT_R * (0.86 + 0.14 * pulse);
   const y = L.baseY * TUT_Y;
-  for (const s of [0.25, 0.75]) {
+  const keys = p.index === 0 ? ['A', 'D'] : ['\u2190', '\u2192'];
+  [0.25, 0.75].forEach((s, i) => {
     circlePath(L.zw * s, y, r);
     ctx.fillStyle = PALETTE.white;
     ctx.globalAlpha = a * (0.18 + 0.16 * pulse);
@@ -2000,7 +2007,11 @@ function drawTutorial(p, cx, slide) {
     ctx.globalAlpha = a;
     setOutline(Math.max(3, L.line * 0.8));
     ctx.stroke();
-  }
+    if (DESKTOP) {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      outlinedText(keys[i], L.zw * s, y, r * 1.1);
+    }
+  });
 
   // Чего избегать: крестик на ближайшей снизу ветке. Опасна любая — сначала
   // как ветка над головой, потом как ветка на уровне фигуры.
@@ -2183,8 +2194,15 @@ function drawMenu() {
   ctx.fillStyle = PALETTE.textDim;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.font = '500 ' + Math.round(Math.min(W * 0.036, 15)) + 'px system-ui, -apple-system, sans-serif';
-  ctx.fillText('Тапай по левой или правой половине своей зоны', W / 2, H * 0.88);
-  ctx.fillText('Ветка с той же стороны — ошеломление', W / 2, H * 0.88 + 22);
+  // На ПК рубят клавишами: у левого игрока A / D, у правого стрелки. Мышь тоже
+  // работает, поэтому про половины зоны говорим и там.
+  const hints = DESKTOP
+    ? ['Клавиши: A / D — левый игрок, \u2190 / \u2192 — правый',
+       'Или мышью по левой и правой половине своей зоны',
+       'Ветка с той же стороны — ошеломление']
+    : ['Тапай по левой или правой половине своей зоны',
+       'Ветка с той же стороны — ошеломление'];
+  hints.forEach((t, i) => ctx.fillText(t, W / 2, H * 0.88 + i * 22));
 
   // Дата файла игры — мелко в углу. По ней сразу видно, не отдал ли браузер
   // старую копию из кэша: GitHub Pages разрешает держать её 10 минут.
