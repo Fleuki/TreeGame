@@ -10,17 +10,20 @@
 | Версия | `1.0.0.0` |
 | Поддерживаемые платформы | Десктоп, Мобильные, Планшеты (ТВ — нет: там нет ни тапов, ни клавиатуры) |
 | Ориентация | **Любая** — раскладка сама переключается: на телефоне зоны друг над другом, на ПК и в альбомной рядом |
-| Игра переведена на | **Русский** (и только он — весь текст в игре русский) |
+| Игра переведена на | **Русский** и **Английский** — язык определяется автоматически через `sdk.environment.i18n.lang` |
 | Возрастной рейтинг | **6+** — мультяшная рубка дерева, без крови и насилия |
 | Категории | «На двоих» / «Для двоих» — основная; второй, если можно выбрать несколько, — «Аркады» |
 | Теги | на двоих, аркада, на реакцию, таймкиллер (выбрать ближайшие из списка) |
 | Облачные сохранения | Выключено — игра ничего не хранит, кроме флага «подсказки уже видел» в `sessionStorage` |
 | Отсроченная публикация | Выключено |
 
-**Про языки.** Если добавить в список английский, модерация проверит, что игра
-переключает язык через `sdk.environment.i18n.lang`. Сейчас этого нет — пока в
-списке только русский, всё честно. Понадобится английский — скажи, добавлю
-локализацию, она встанет в ту же обёртку `Yandex`.
+**Про языки.** Игра сама спрашивает язык у площадки
+(`sdk.environment.i18n.lang`) и переключает интерфейс — это требование 2.14.
+Поддержаны русский и английский; любой другой язык площадки показывается
+по-английски. Вне площадки (GitHub Pages) язык берётся из браузера. Поэтому в
+списке «Игра переведена на» нужно отметить **оба** языка, и на вкладке
+«Английский» в разделе «Описание и продвижение» заполнить английские тексты —
+они ниже.
 
 ## Ключевые слова (≤100)
 
@@ -113,6 +116,79 @@ game_api_resume.
 Игра — один HTML-файл без сборки, внешних запросов и загрузки ресурсов со
 стороны нет: вся графика и звук генерируются на канве и через Web Audio API.
 Данные пользователя не собираются, лидерборды и покупки не используются.
+```
+
+## Английские тексты (вкладка «Английский»)
+
+### Название
+
+```
+Lumberjacks: one-screen duel
+```
+
+### Короткое описание
+
+```
+One-screen lumberjack duel: chop the trunk, dodge the branches
+```
+
+### Описание для SEO
+
+```
+Lumberjacks is a one-screen duel for two players or against a bot. Chop the
+trunk faster than your rival, but never swing at the side where a branch is —
+you get stunned and lose precious time. First to a hundred chops wins.
+```
+
+### Об игре
+
+```
+Two lumberjacks, one tree and a single screen. The screen splits in half: each
+player gets their own side, their own tree and their own axe. On a phone the
+halves sit one above the other and the top one is turned upside down on purpose
+— the second player sits across the table from the first and sees everything
+the right way up. On a computer, or in landscape, the halves simply stand side
+by side.
+
+One rule decides everything: you may only chop from the side that is clear. A
+branch right in front of the lumberjack, or hanging above his head, means that
+side is taken — swing into it and you are stunned for seven tenths of a second.
+While your rival is shaking it off you get several free chops in, so the winner
+is not the one who taps fastest, but the one who keeps watching the tree.
+
+First to a hundred points wins. Play with a friend on one device, or against
+the bot — four levels from Easy to Master: the higher the level, the faster it
+chops and the rarer its mistakes.
+
+No sign-up, no ten-minute tutorial, no menus three screens deep: open it, pick
+a mode, play. The first-run hints use no words at all — just where to press and
+which branch to keep away from.
+```
+
+### Как играть
+
+```
+On a phone: tap the left or right half of your zone — the lumberjack steps to
+that side of the trunk and swings. In two-player games the screen splits in
+half and the top half is rotated 180 degrees: the second player sits on the
+other side of the phone and reads everything the right way up.
+
+On a computer: the left player chops with A and D, the right one with the left
+and right arrows, or with K and L if the keyboard has no arrow keys. The
+keyboard layout does not matter.  The mouse works too — click the left or right
+half of your zone.
+
+The rule: you may only chop from a clear side. If a branch stands in front of
+the lumberjack or hangs above his head, that side is taken — swinging into it
+stuns you for 0.7 seconds and costs you time. There is always a clear side.
+
+Every clean chop is one point. First to a hundred wins.
+```
+
+### Ключевые слова
+
+```
+lumberjacks, two players, duel, chop the tree, reaction, arcade, one screen
 ```
 
 ## Картинки
