@@ -6,6 +6,10 @@
 <meta name="theme-color" content="#111820">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Лесорубы — дуэль</title>
+<!-- Yandex Games SDK. Скрипт может не загрузиться (GitHub Pages, локальный
+     файл, оффлайн) — вся работа с ним идёт через обёртку Yandex, и без SDK
+     игра просто живёт без рекламы. -->
+<script src="https://yandex.ru/games/sdk/v2"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body {
@@ -25,8 +29,9 @@
 /* =========================================================================
    ЛЕСОРУБЫ — дуэль на одном экране
    Один файл, без сборки и внешних зависимостей.
-   Разделы: ПАЛИТРА · КОНСТАНТЫ · СОСТОЯНИЕ · ЗВУК · ГЕНЕРАЦИЯ ДЕРЕВА ·
-            РАЗМЕТКА · ВВОД · ЛОГИКА · БОТ · ОТРИСОВКА · ЦИКЛ
+   Разделы: ПАЛИТРА · КОНСТАНТЫ · СОСТОЯНИЕ · ЗВУК · YANDEX GAMES SDK ·
+            ГЕНЕРАЦИЯ ДЕРЕВА · РАЗМЕТКА · ВВОД · ЛОГИКА · БОТ · ОТРИСОВКА ·
+            ЦИКЛ
    ========================================================================= */
 
 
@@ -327,7 +332,8 @@ const ctx    = canvas.getContext('2d', { alpha:false });
 let W = 0, H = 0, DPR = 1;          // размеры в CSS-пикселях
 let L = {};                          // вычисленная разметка (см. computeLayout)
 
-let scene   = 'menu';                // 'menu' | 'difficulty' | 'play' | 'over'
+// Стартуем с экрана загрузки: пока не ответил SDK, цикл не запускаем.
+let scene   = 'loading';             // 'loading' | 'menu' | 'difficulty' | 'play' | 'over'
 let mode    = 'bot';                 // 'bot' | 'duo'
 let diff    = DIFFICULTY[1];
 let winner  = null;
@@ -371,7 +377,8 @@ let players = [makePlayer(0, false), makePlayer(1, true)];
    4. ЗВУК — Web Audio API, все тона генерируются на лету.
    ========================================================================= */
 const Sound = (function () {
-  let ac = null, master = null, noiseBuf = null, ok = true;
+  const VOLUME = 0.45;
+  let ac = null, master = null, noiseBuf = null, ok = true, muted = false;
 
   function ensure() {
     if (ac || !ok) return;
@@ -379,7 +386,7 @@ const Sound = (function () {
     if (!AC) { ok = false; return; }
     ac = new AC();
     master = ac.createGain();
-    master.gain.value = 0.45;
+    master.gain.value = muted ? 0 : VOLUME;
     master.connect(ac.destination);
 
     const len = Math.floor(ac.sampleRate * 0.4);
@@ -391,6 +398,17 @@ const Sound = (function () {
   function unlock() {
     ensure();
     if (ac && ac.state === 'suspended') ac.resume();
+  }
+
+  /**
+   * Полная тишина на время рекламы и пока игра свёрнута: гасим общий гейн,
+   * а не отдельные голоса — уже запущенные звуки тоже замолкают. Флаг живёт
+   * и до создания контекста: если звук ещё не включали, он появится уже
+   * приглушённым.
+   */
+  function setMute(on) {
+    muted = on;
+    if (master) master.gain.value = on ? 0 : VOLUME;
   }
 
   function tone(freq, dur, type, vol, slideTo, delay) {
@@ -422,6 +440,7 @@ const Sound = (function () {
 
   return {
     unlock,
+    mute: setMute,
     chop(pitch) {
       noise(0.09, 0.32, 1700, 0.9);
       tone(150 + pitch * 40, 0.085, 'square', 0.16, 70);
@@ -441,6 +460,122 @@ const Sound = (function () {
     }
   };
 })();
+
+
+/* =========================================================================
+   4½. YANDEX GAMES SDK — единственное место, где игра знает про площадку.
+   Весь остальной код зовёт только методы Yandex.*, поэтому без SDK (GitHub
+   Pages, локальный файл, оффлайн) игра работает точно так же — без рекламы.
+   ========================================================================= */
+const AD_GAP    = 60;        // сек. — не чаще одного показа рекламы
+const SDK_WAIT  = 4;         // сек. — столько ждём SDK на экране загрузки
+const AD_HANG   = 30;        // сек. — после этого считаем, что реклама не закрылась
+
+const Yandex = {
+  sdk: null,
+  ready: false,              // SDK на связи; false — играем без площадки
+  lastAdTime: 0,             // мс, время последнего показа рекламы
+  paused: false,             // реклама или свёрнутая игра: логика стоит, звука нет
+  wantReady: false,          // игра готова показать первый экран
+  readySent: false,          // LoadingAPI.ready() уже отправлен
+
+  /**
+   * Инициализация. Наружу не бросает ничего: нет скрипта, ответа или ответ с
+   * ошибкой — ready остаётся false, и все методы становятся пустышками.
+   * Ждём SDK не дольше SDK_WAIT, но обещание не бросаем: если площадка
+   * ответит позже, она всё равно получит своё (см. attach) — иначе на медленной
+   * сети игрок сидел бы на экране загрузки, а без LoadingAPI.ready() игру не
+   * пропустила бы модерация.
+   */
+  async init() {
+    try {
+      if (typeof YaGames === 'undefined') return;
+      const connect = YaGames.init()
+        .then(sdk => this.attach(sdk))
+        .catch(() => { this.sdk = null; this.ready = false; });
+      await Promise.race([
+        connect,
+        new Promise(res => setTimeout(res, SDK_WAIT * 1000))
+      ]);
+    } catch (e) {
+      this.sdk = null;
+      this.ready = false;
+    }
+  },
+
+  /** SDK ответил: запоминаем его и подписываемся на события площадки. */
+  attach(sdk) {
+    this.sdk = sdk;
+    this.ready = true;
+    // Реклама сразу после запуска не показывается: отсчёт AD_GAP идёт с
+    // начала сессии, а не с нуля.
+    this.lastAdTime = Date.now();
+    try {
+      // Площадка сама говорит, когда игру свернули или открыли своё окно.
+      sdk.on('game_api_pause',  () => this.setPaused(true));
+      sdk.on('game_api_resume', () => this.setPaused(false));
+    } catch (e) { /* нет событий — не беда, игра работает */ }
+    if (this.wantReady) this.loadingReady();   // игра ждала нас, а не наоборот
+  },
+
+  /**
+   * Ресурсы загружены, первый экран готов. Без этого вызова игра не пройдёт
+   * модерацию, поэтому если SDK ответил позже игры — вызов уходит из attach.
+   */
+  loadingReady() {
+    this.wantReady = true;
+    try {
+      if (this.ready && !this.readySent) {
+        this.sdk.features.LoadingAPI.ready();
+        this.readySent = true;
+      }
+    } catch (e) { /* площадка сама разберётся, игре это не мешает */ }
+  },
+
+  /** Пауза: логику не крутим (см. frame), звук глушим целиком. */
+  setPaused(on) {
+    this.paused = on;
+    Sound.mute(on);
+  },
+
+  /**
+   * Реклама между забегами. Колбэк вызывается всегда — и когда рекламы нет,
+   * и когда она не открылась: игровой код не должен знать про площадку.
+   * Пауза и тишина ставятся до вызова, а не в onOpen: между вызовом и
+   * открытием окна успел бы прозвучать звук нажатия.
+   */
+  showInterstitial(onDone) {
+    let settled = false;
+    // Колбэк ровно один раз, кто бы ни позвал: onClose, onError или страховка.
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      this.setPaused(false);
+      if (onDone) onDone();
+    };
+    // Рекламы не будет: SDK нет или прошло меньше AD_GAP. Пауза при этом не
+    // трогается — вдруг игра стоит по просьбе площадки.
+    if (!this.ready || Date.now() - this.lastAdTime < AD_GAP * 1000) {
+      settled = true;
+      if (onDone) onDone();
+      return;
+    }
+    this.lastAdTime = Date.now();
+    this.setPaused(true);
+    try {
+      this.sdk.adv.showFullscreenAdv({
+        callbacks: {
+          onOpen:  () => this.setPaused(true),
+          onClose: done,
+          onError: done
+        }
+      });
+      // Страховка от чёрного экрана: если окно так и не закрылось, снимаем
+      // паузу сами — лучше игра без рекламы, чем застывшая игра.
+      setTimeout(done, AD_HANG * 1000);
+    } catch (e) { done(); }
+  }
+};
 
 
 /* =========================================================================
@@ -503,6 +638,9 @@ function resize() {
   canvas.style.height = H + 'px';
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   computeLayout();
+  // Смена размера чистит канву, а кадр может и не прийти: на загрузке цикла
+  // ещё нет, на паузе он ничего не рисует. Перерисуем сами.
+  if (scene === 'loading' || Yandex.paused) render();
 }
 
 /*
@@ -663,6 +801,8 @@ function sideOfTap(p, x, y) {
 }
 
 function onPoint(x, y) {
+  // Идёт реклама или игра свёрнута — тапы не наши; на загрузке нажимать нечего.
+  if (Yandex.paused || scene === 'loading') return;
   Sound.unlock();
 
   if (scene === 'play') {
@@ -698,6 +838,7 @@ canvas.addEventListener('mousedown', e => { e.preventDefault(); onPoint(e.client
 // Клавиатура — тоже для десктопа: A/D — левый игрок, ←/→ — правый.
 window.addEventListener('keydown', e => {
   if (e.repeat) return;
+  if (Yandex.paused || scene === 'loading') return;
   Sound.unlock();
   if (scene !== 'play') {
     if (e.key === 'Enter' || e.key === ' ') { if (buttons[0]) buttons[0].action(); }
@@ -1969,6 +2110,20 @@ function drawTitle(title, subtitle) {
   }
 }
 
+/**
+ * Экран загрузки: висит, пока не ответит SDK. Рисуется один кадр — игрового
+ * цикла в это время ещё нет, поэтому анимации здесь и не может быть.
+ */
+function drawLoading() {
+  drawBackground();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  outlinedText('ЛЕСОРУБЫ', W / 2, H * 0.44, Math.min(W * 0.13, H * 0.09, 64));
+  ctx.fillStyle = PALETTE.textDim;
+  ctx.font = '500 ' + Math.round(Math.min(W * 0.045, 20)) +
+             'px system-ui, -apple-system, sans-serif';
+  ctx.fillText('загрузка…', W / 2, H * 0.44 + Math.min(W * 0.10, 52));
+}
+
 function drawMenu() {
   drawBackground();
   buttons = [];
@@ -2066,12 +2221,17 @@ function drawGameOver() {
   const bh = Math.max(BTN_MIN_H, Math.min(H * 0.10, BTN_MAX_H));
   const x  = (W - bw) / 2;
   let y = L.stacked ? H / 2 - bh - BTN_GAP / 2 : H * 0.56;
-  button(x, y, bw, bh, 'Ещё раз', null, () => startGame(mode), true);
+  // Реклама — ровно здесь, между забегами: рестарт и выход в меню. Сам забег
+  // ничем не прерывается, а первый забег рекламы не видит (см. lastAdTime).
+  button(x, y, bw, bh, 'Ещё раз', null,
+         () => Yandex.showInterstitial(() => startGame(mode)), true);
   y += bh + BTN_GAP;
-  button(x, y, bw, bh, 'В меню', null, () => { scene = 'menu'; }, false);
+  button(x, y, bw, bh, 'В меню', null,
+         () => Yandex.showInterstitial(() => { scene = 'menu'; }), false);
 }
 
 function render() {
+  if (scene === 'loading')         { drawLoading(); return; }
   if (scene === 'menu')            { drawMenu(); return; }
   if (scene === 'difficulty')      { drawDifficulty(); return; }
   if (scene === 'over')            { drawGameOver(); return; }
@@ -2096,6 +2256,10 @@ function frame(now) {
   last = now;
   if (dt > 0.25) dt = 0.25;          // вернулись из фона — не прокручиваем логику
 
+  // Реклама или свёрнутая игра: логику не двигаем и долг не копим, на экране
+  // остаётся последний кадр.
+  if (Yandex.paused) { acc = 0; return; }
+
   acc += dt;
   let guard = 0;
   while (acc >= STEP && guard++ < 8) { update(STEP); acc -= STEP; }
@@ -2103,8 +2267,19 @@ function frame(now) {
   render();
 }
 
+/*
+ * Запуск. Игровой цикл стартует только после ответа SDK — до тех сидим на
+ * статичном экране загрузки. Как только площадка на связи (или выяснилось,
+ * что её нет), говорим LoadingAPI.ready() и показываем меню.
+ */
 resize();
-requestAnimationFrame(frame);
+drawLoading();
+Yandex.init().then(() => {
+  Yandex.loadingReady();
+  scene = 'menu';
+  last = 0;
+  requestAnimationFrame(frame);
+});
 </script>
 </body>
 </html>
