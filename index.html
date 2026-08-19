@@ -296,10 +296,10 @@ const BRANCH_CHANCE= 0.95;    // вероятность ветки на ново
 const BRANCH_GAP   = 1;       // сколько пустых сегментов между ветками
 const MAX_SAME_RUN = 2;       // не больше двух веток подряд с одной стороны
 const SAFE_START   = 2;       // первые сегменты — всегда без веток
-// Опасна не та ветка, в которой стоит персонаж, а та, что висит у него над
-// головой: после удара ствол опускается на сегмент, и она приходит ровно по
-// макушке. Поэтому проверяем сегмент HAZARD_SEG, а не нулевой — по нему же
-// целится бот и его же помечает крестик в подсказках.
+// Рубить нельзя с той стороны, где ветка стоит перед лесорубом (ряд 0) или
+// висит у него над головой (ряд HAZARD_SEG): после удара ствол опускается на
+// сегмент, и такая ветка приходит ровно по макушке. Оба ряда проверяет
+// blockedSide — по нему же целится бот и его же помечает крестик в подсказках.
 const HAZARD_SEG   = 1;       // ряд на высоте головы
 const MIN_TRUNK    = 14;      // минимум сегментов в памяти (дополняется под экран)
 const TUTORIAL_TIME = 3.0;    // сек. показа подсказок перед первым забегом
@@ -878,6 +878,23 @@ function startGame(newMode) {
   scene = 'play';
 }
 
+/**
+ * Сторона, по которой рубить нельзя. Таких сторон не больше одной: между
+ * ветками всегда есть пустой сегмент (BRANCH_GAP), поэтому в окне из двух
+ * нижних рядов ветка может быть только одна.
+ *  - ряд 0 — ветка на уровне фигуры: она прямо перед лесорубом, к стволу с
+ *    этой стороны не подойти, рубить можно только с противоположной;
+ *  - ряд HAZARD_SEG — ветка над головой: после удара ствол опустится на
+ *    сегмент, и она придёт ровно по макушке.
+ */
+function blockedSide(p) {
+  for (let i = 0; i <= HAZARD_SEG; i++) {
+    const s = p.segments[i];
+    if (s && s.branch !== NONE) return s.branch;
+  }
+  return NONE;
+}
+
 function chopAttempt(p, side) {
   if (scene !== 'play' || countdown > 0) return;
 
@@ -886,14 +903,12 @@ function chopAttempt(p, side) {
 
   if (p.stun > 0) return;                     // ошеломлён — тапы игнорируются
 
-  p.side = side;
-  p.chop = CHOP_TIME;
-
-  const bottom = p.segments[0];
-  const head   = p.segments[HAZARD_SEG];
-  if (head && head.branch === side) {
-    // Ветка над головой: шагнув на эту сторону, персонаж встретил бы её
-    // макушкой — зона краснеет, его отбрасывает.
+  const bad = blockedSide(p);
+  if (bad !== NONE && bad === side) {
+    // Ветка с этой стороны: либо она прямо перед лесорубом, либо придёт по
+    // макушке, когда ствол опустится. Рубить её можно только с чистой
+    // стороны — туда его и отбрасывает, а сам удар не проходит.
+    p.side = side === LEFT ? RIGHT : LEFT;
     p.stun = STUN_TIME;
     p.shake = STUN_SHAKE_T; p.shakeDur = STUN_SHAKE_T; p.shakeMag = STUN_SHAKE;
     p.red = 1;
@@ -903,7 +918,11 @@ function chopAttempt(p, side) {
     return;
   }
 
+  p.side = side;
+  p.chop = CHOP_TIME;
+
   // Чистый удар: нижний сегмент уходит, ствол опускается, сверху новый.
+  const bottom = p.segments[0];
   if (bottom.branch !== NONE) spawnFlyingBranch(p, bottom.branch);
   p.segments.shift();
   p.segments.push(nextSegment(p.segments));
@@ -1093,7 +1112,7 @@ function updateBot(p, dt) {
   if (p.botTimer > 0) return;
   p.botTimer = botInterval(p) * (0.85 + Math.random() * 0.3);
 
-  const branch = (p.segments[HAZARD_SEG] || { branch: NONE }).branch;
+  const branch = blockedSide(p);
   const safe = branch === LEFT ? RIGHT : (branch === RIGHT ? LEFT
               : (Math.random() < 0.5 ? LEFT : RIGHT));
 
@@ -1975,10 +1994,10 @@ function drawTutorial(p, cx, slide) {
     ctx.stroke();
   }
 
-  // Чего избегать: крестик на ближайшей опасной ветке — той, что придёт по
-  // голове (HAZARD_SEG и выше). Ниже неё ветки не опасны, метить их нельзя.
+  // Чего избегать: крестик на ближайшей снизу ветке. Опасна любая — сначала
+  // как ветка над головой, потом как ветка на уровне фигуры.
   let bi = -1;
-  for (let i = HAZARD_SEG; i < p.segments.length; i++) {
+  for (let i = 0; i < p.segments.length; i++) {
     const cy = segY(i, slide);
     if (p.segments[i].branch === NONE) continue;
     if (cy < 0 || !branchFitsZone(cy)) continue;
