@@ -358,6 +358,7 @@ function makePlayer(index, isBot) {
     side: LEFT,          // с какой стороны ствола стоит персонаж
     chop: 0,             // таймер анимации удара
     stun: 0,             // таймер ошеломления
+    stunFlip: null,      // куда перебраться, когда ошеломление спадёт
     trunkAnim: 0,        // 1 → 0, твин опускания ствола
     shake: 0, shakeDur: SHAKE_TIME, shakeMag: 0,
     red: 0,              // красная заливка зоны на промахе
@@ -906,9 +907,11 @@ function chopAttempt(p, side) {
   const bad = blockedSide(p);
   if (bad !== NONE && bad === side) {
     // Ветка с этой стороны: либо она прямо перед лесорубом, либо придёт по
-    // макушке, когда ствол опустится. Рубить её можно только с чистой
-    // стороны — туда его и отбрасывает, а сам удар не проходит.
-    p.side = side === LEFT ? RIGHT : LEFT;
+    // макушке, когда ствол опустится. Удар не проходит: лесоруб шагнул под
+    // ветку и там же стоит ошеломлённый, а на чистую сторону перебирается,
+    // когда ошеломление спадёт (см. update).
+    p.side = side;
+    p.stunFlip = side === LEFT ? RIGHT : LEFT;
     p.stun = STUN_TIME;
     p.shake = STUN_SHAKE_T; p.shakeDur = STUN_SHAKE_T; p.shakeMag = STUN_SHAKE;
     p.red = 1;
@@ -1075,7 +1078,12 @@ function update(dt) {
       p.chipPending = false;
       spawnChips(p, p.side);
     }
-    if (p.stun > 0)      p.stun = Math.max(0, p.stun - dt);
+    if (p.stun > 0) {
+      p.stun = Math.max(0, p.stun - dt);
+      // Отпустило — лесоруб перебирается на чистую сторону от ветки, в
+      // которую только что влез.
+      if (p.stun === 0 && p.stunFlip) { p.side = p.stunFlip; p.stunFlip = null; }
+    }
     if (p.shake > 0)     p.shake = Math.max(0, p.shake - dt);
     if (p.red > 0)       p.red = Math.max(0, p.red - dt / RED_TIME);
     if (p.knock > 0)     p.knock = Math.max(0, p.knock - dt);
