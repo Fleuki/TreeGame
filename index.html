@@ -2085,6 +2085,19 @@ function drawCountdown() {
 
 /* ---------- Экраны меню ---------- */
 
+/**
+ * Дата самого файла игры (не сборки — сборки у нас нет). Показывается мелко в
+ * меню: если браузер отдал старую копию из кэша, здесь будет старое время, и
+ * не надо гадать, та ли это версия.
+ */
+const BUILD = (function () {
+  const d = new Date(document.lastModified);
+  if (isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getDate()) + '.' + p(d.getMonth() + 1) +
+         ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+})();
+
 // Кнопки крупные: пальцем по ним попадают оба игрока, в том числе вслепую.
 const BTN_MIN_H  = 60;        // px — минимальная высота кнопки
 const BTN_MAX_H  = 84;
@@ -2172,6 +2185,15 @@ function drawMenu() {
   ctx.font = '500 ' + Math.round(Math.min(W * 0.036, 15)) + 'px system-ui, -apple-system, sans-serif';
   ctx.fillText('Тапай по левой или правой половине своей зоны', W / 2, H * 0.88);
   ctx.fillText('Ветка с той же стороны — ошеломление', W / 2, H * 0.88 + 22);
+
+  // Дата файла игры — мелко в углу. По ней сразу видно, не отдал ли браузер
+  // старую копию из кэша: GitHub Pages разрешает держать её 10 минут.
+  if (BUILD) {
+    ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.font = '500 ' + Math.round(Math.min(W * 0.028, 12)) +
+               'px system-ui, -apple-system, sans-serif';
+    ctx.fillText('сборка ' + BUILD, W - 10, H - 8);
+  }
 }
 
 function drawDifficulty() {
