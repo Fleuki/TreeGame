@@ -842,6 +842,16 @@ canvas.addEventListener('touchend',   e => e.preventDefault(), { passive:false }
 canvas.addEventListener('mousedown', e => { e.preventDefault(); onPoint(e.clientX, e.clientY); });
 
 // Клавиатура — тоже для десктопа: A/D — левый игрок, ←/→ — правый.
+/**
+ * Клавиша → игрок и сторона. Ключи — коды физических клавиш (e.code), поэтому
+ * раскладка не важна: русская «ф» на месте «A» сработает так же.
+ */
+const KEY_BIND = {
+  KeyA: [0, LEFT],  KeyD: [0, RIGHT],
+  ArrowLeft: [1, LEFT], ArrowRight: [1, RIGHT],
+  KeyK: [1, LEFT],  KeyL: [1, RIGHT]
+};
+
 window.addEventListener('keydown', e => {
   if (e.repeat) return;
   if (Yandex.paused || scene === 'loading') return;
@@ -850,11 +860,16 @@ window.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === ' ') { if (buttons[0]) buttons[0].action(); }
     return;
   }
-  const k = e.key.toLowerCase();
-  if (k === 'a') chopAttempt(players[0], LEFT);
-  else if (k === 'd') chopAttempt(players[0], RIGHT);
-  else if (e.key === 'ArrowLeft')  chopAttempt(players[1], LEFT);
-  else if (e.key === 'ArrowRight') chopAttempt(players[1], RIGHT);
+  // Клавиши читаем по e.code — это физическая клавиша, а не символ. Иначе на
+  // русской раскладке «A» приходит как «ф» и управление отваливается у всех,
+  // кто не переключил язык. Правому игроку кроме стрелок дано K / L: на
+  // клавиатурах на 60 % стрелок попросту нет, а K и L есть везде и лежат под
+  // правой рукой рядом.
+  const bind = KEY_BIND[e.code];
+  if (bind) {
+    e.preventDefault();
+    chopAttempt(players[bind[0]], bind[1]);
+  }
 });
 
 // Гасим зум по двойному тапу, жесты и контекстное меню.
@@ -1998,7 +2013,7 @@ function drawTutorial(p, cx, slide) {
   // этого игрока — у левого A / D, у правого стрелки.
   const r = L.zw * TUT_R * (0.86 + 0.14 * pulse);
   const y = L.baseY * TUT_Y;
-  const keys = p.index === 0 ? ['A', 'D'] : ['\u2190', '\u2192'];
+  const keys = p.index === 0 ? ['A', 'D'] : ['\u2190 K', '\u2192 L'];
   [0.25, 0.75].forEach((s, i) => {
     circlePath(L.zw * s, y, r);
     ctx.fillStyle = PALETTE.white;
@@ -2009,7 +2024,7 @@ function drawTutorial(p, cx, slide) {
     ctx.stroke();
     if (DESKTOP) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      outlinedText(keys[i], L.zw * s, y, r * 1.1);
+      outlinedText(keys[i], L.zw * s, y, r * (p.index === 0 ? 1.1 : 0.66));
     }
   });
 
@@ -2197,7 +2212,7 @@ function drawMenu() {
   // На ПК рубят клавишами: у левого игрока A / D, у правого стрелки. Мышь тоже
   // работает, поэтому про половины зоны говорим и там.
   const hints = DESKTOP
-    ? ['Клавиши: A / D — левый игрок, \u2190 / \u2192 — правый',
+    ? ['Клавиши: A / D — левый игрок, \u2190 / \u2192 или K / L — правый',
        'Или мышью по левой и правой половине своей зоны',
        'Ветка с той же стороны — ошеломление']
     : ['Тапай по левой или правой половине своей зоны',
