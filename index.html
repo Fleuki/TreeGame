@@ -443,11 +443,36 @@ let goFlash = 0;                     // таймер надписи «РУБИ!�
 let buttons = [];                    // активные кнопки текущей сцены
 let tutorial = 0;                    // таймер подсказок первого забега
 
-// Подсказки показываются один раз за сессию вкладки. sessionStorage может быть
-// недоступен (приватный режим, iframe) — тогда просто покажем их снова.
-const TUT_KEY = 'lumberjacks-tutorial-seen';
-function tutorialSeen()     { try { return sessionStorage.getItem(TUT_KEY) === '1'; } catch (e) { return false; } }
-function markTutorialSeen() { try { sessionStorage.setItem(TUT_KEY, '1'); } catch (e) {} }
+/*
+ * Настройки и прогресс переживают закрытие вкладки (требование 1.9): выбранная
+ * сложность и то, что подсказки уже показывали. localStorage может быть
+ * недоступен (приватный режим, запрет данных сайта в iframe) — тогда игра
+ * просто каждый раз начинает с умолчаний, ошибок наружу не летит.
+ */
+const STORE_KEY = 'lumberjacks-save-v1';
+const Store = {
+  data: { tutorialSeen: false, diffId: null },
+
+  load() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (raw) Object.assign(this.data, JSON.parse(raw));
+    } catch (e) { /* нет хранилища или мусор в нём — играем с умолчаний */ }
+  },
+
+  set(key, value) {
+    this.data[key] = value;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(this.data)); } catch (e) {}
+  }
+};
+Store.load();
+
+// Сложность, выбранная в прошлый раз. Пропала из списка — остаётся умолчание.
+const savedDiff = DIFFICULTY.find(d => d.id === Store.data.diffId);
+if (savedDiff) diff = savedDiff;
+
+function tutorialSeen()     { return Store.data.tutorialSeen === true; }
+function markTutorialSeen() { Store.set('tutorialSeen', true); }
 
 function makePlayer(index, isBot) {
   return {
@@ -576,7 +601,9 @@ const Yandex = {
   sdk: null,
   ready: false,              // SDK на связи; false — играем без площадки
   lastAdTime: 0,             // мс, время последнего показа рекламы
-  paused: false,             // реклама или свёрнутая игра: логика стоит, звука нет
+  paused: false,             // производное от pauseWhy: логика стоит, звука нет
+  pauseWhy: { platform: false, adv: false, hidden: false },
+  gameplayOn: false,         // последнее, что сказали площадке про геймплей
   wantReady: false,          // игра готова показать первый экран
   readySent: false,          // LoadingAPI.ready() уже отправлен
 
@@ -615,8 +642,8 @@ const Yandex = {
     this.lastAdTime = Date.now();
     try {
       // Площадка сама говорит, когда игру свернули или открыли своё окно.
-      sdk.on('game_api_pause',  () => this.setPaused(true));
-      sdk.on('game_api_resume', () => this.setPaused(false));
+      sdk.on('game_api_pause',  () => this.setPaused('platform', true));
+      sdk.on('game_api_resume', () => this.setPaused('platform', false));
     } catch (e) { /* нет событий — не беда, игра работает */ }
     if (this.wantReady) this.loadingReady();   // игра ждала нас, а не наоборот
   },
@@ -635,10 +662,33 @@ const Yandex = {
     } catch (e) { /* площадка сама разберётся, игре это не мешает */ }
   },
 
-  /** Пауза: логику не крутим (см. frame), звук глушим целиком. */
-  setPaused(on) {
-    this.paused = on;
-    Sound.mute(on);
+  /**
+   * Пауза складывается из причин: площадка попросила («platform»), идёт
+   * реклама («adv»), вкладку свернули («hidden»). Держим их по отдельности —
+   * иначе возврат из фона снял бы паузу, поставленную рекламой. Пока хоть
+   * одна причина жива: логику не крутим (см. frame), звук глушим целиком.
+   */
+  setPaused(why, on) {
+    this.pauseWhy[why] = on;
+    this.paused = this.pauseWhy.platform || this.pauseWhy.adv || this.pauseWhy.hidden;
+    Sound.mute(this.paused);
+    // Геймплей кончился раньше, чем нарисуется следующий кадр: площадка должна
+    // услышать stop() до того, как откроется реклама.
+    if (this.paused) this.gameplay(false);
+  },
+
+  /**
+   * GameplayAPI (требование 1.19.2): площадка знает, идёт ли прямо сейчас
+   * игровой процесс. Зовём каждый кадр — состояние меняют и сцены, и пауза, и
+   * реклама, — но наружу уходит только смена значения.
+   */
+  gameplay(on) {
+    if (!this.ready || on === this.gameplayOn) return;
+    this.gameplayOn = on;
+    try {
+      if (on) this.sdk.features.GameplayAPI.start();
+      else    this.sdk.features.GameplayAPI.stop();
+    } catch (e) { /* нет GameplayAPI — игре это не мешает */ }
   },
 
   /**
@@ -653,7 +703,7 @@ const Yandex = {
     const done = () => {
       if (settled) return;
       settled = true;
-      this.setPaused(false);
+      this.setPaused('adv', false);
       if (onDone) onDone();
     };
     // Рекламы не будет: SDK нет или прошло меньше AD_GAP. Пауза при этом не
@@ -664,11 +714,11 @@ const Yandex = {
       return;
     }
     this.lastAdTime = Date.now();
-    this.setPaused(true);
+    this.setPaused('adv', true);
     try {
       this.sdk.adv.showFullscreenAdv({
         callbacks: {
-          onOpen:  () => this.setPaused(true),
+          onOpen:  () => this.setPaused('adv', true),
           onClose: done,
           onError: done
         }
@@ -976,6 +1026,14 @@ window.addEventListener('dblclick',    e => e.preventDefault());
   window.addEventListener(n, e => e.preventDefault(), { passive:false }));
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+// Схлопывание адресной строки на мобильных меняет высоту окна, но событие
+// resize приходит не везде (iOS Safari, часть WebView) — visualViewport есть.
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
+// Требование 1.3: ушли на другую вкладку или свернули браузер — звук замолкает
+// и логика стоит. Событий площадки тут не ждём: игра должна вести себя так же,
+// когда SDK не подключился (черновик по прямой ссылке, запуск с диска).
+document.addEventListener('visibilitychange', () => Yandex.setPaused('hidden', document.hidden));
 
 
 /* =========================================================================
@@ -2345,7 +2403,7 @@ function drawDifficulty() {
   DIFFICULTY.forEach((d, i) => {
     const col = i % cols, row = (i / cols) | 0;
     button(x0 + col * (cw + BTN_GAP), top + row * (bh + BTN_GAP), cw, bh,
-           t(d.key), null, () => { diff = d; startGame('bot'); }, d.id === diff.id);
+           t(d.key), null, () => { diff = d; Store.set('diffId', d.id); startGame('bot'); }, d.id === diff.id);
     y = top + (row + 1) * (bh + BTN_GAP);
   });
   button(x0, y, bw, BTN_MIN_H, t('back'), null, () => { scene = 'menu'; }, false);
@@ -2431,6 +2489,10 @@ function frame(now) {
   let dt = (now - last) / 1000;
   last = now;
   if (dt > 0.25) dt = 0.25;          // вернулись из фона — не прокручиваем логику
+
+  // Забег идёт только в сцене боя и только без паузы: меню, экран итогов и
+  // реклама для площадки геймплеем не считаются.
+  Yandex.gameplay(scene === 'play' && !Yandex.paused);
 
   // Реклама или свёрнутая игра: логику не двигаем и долг не копим, на экране
   // остаётся последний кадр.
