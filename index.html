@@ -101,6 +101,101 @@ const PALETTE = {
 
 
 /* =========================================================================
+   1½. ЯЗЫК — весь видимый текст живёт здесь и только здесь.
+   Язык берётся у площадки (sdk.environment.i18n.lang, требование 2.14
+   Яндекс.Игр), а без SDK — из языка браузера. Русский и английский; всё
+   остальное считаем английским.
+   ========================================================================= */
+const STRINGS = {
+  ru: {
+    title:      'ЛЕСОРУБЫ',
+    subtitle:   'дуэль до %s очков',
+    loading:    'загрузка…',
+    vsBot:      'Против бота',
+    vsBotSub:   'сложность: %s',
+    duo:        'На двоих',
+    duoStacked: 'один снизу, второй сверху',
+    duoSide:    'один экран, два игрока',
+    hintKeys:   'Клавиши: A / D — левый игрок, \u2190 / \u2192 или K / L — правый',
+    hintMouse:  'Или мышью по левой и правой половине своей зоны',
+    hintTap:    'Тапай по левой или правой половине своей зоны',
+    hintRule:   'Ветка с той же стороны — ошеломление',
+    build:      'сборка %s',
+    difficulty: 'Сложность',
+    diffEasy:   'Легко',
+    diffNormal: 'Средне',
+    diffHard:   'Сложно',
+    diffMaster: 'Мастер',
+    back:       'Назад',
+    go:         'РУБИ!',
+    win:        'ПОБЕДА',
+    lose:       'ПОРАЖЕНИЕ',
+    again:      'Ещё раз',
+    toMenu:     'В меню',
+    p1:         'Игрок 1',
+    p2:         'Игрок 2',
+    bot:        'Бот',
+    pageTitle:  'Лесорубы — дуэль'
+  },
+  en: {
+    title:      'LUMBERJACKS',
+    subtitle:   'duel to %s points',
+    loading:    'loading…',
+    vsBot:      'Vs bot',
+    vsBotSub:   'difficulty: %s',
+    duo:        'Two players',
+    duoStacked: 'one below, one above',
+    duoSide:    'one screen, two players',
+    hintKeys:   'Keys: A / D — left player, \u2190 / \u2192 or K / L — right',
+    hintMouse:  'Or click the left and right half of your zone',
+    hintTap:    'Tap the left or right half of your zone',
+    hintRule:   'A branch on that side — you get stunned',
+    build:      'build %s',
+    difficulty: 'Difficulty',
+    diffEasy:   'Easy',
+    diffNormal: 'Normal',
+    diffHard:   'Hard',
+    diffMaster: 'Master',
+    back:       'Back',
+    go:         'CHOP!',
+    win:        'YOU WIN',
+    lose:       'YOU LOSE',
+    again:      'Play again',
+    toMenu:     'Menu',
+    p1:         'Player 1',
+    p2:         'Player 2',
+    bot:        'Bot',
+    pageTitle:  'Lumberjacks — a duel'
+  }
+};
+
+let lang = 'en';
+
+/** Строка на текущем языке; %s подставляется первым аргументом. */
+function t(key, arg) {
+  const dict = STRINGS[lang] || STRINGS.en;
+  const s = (key in dict ? dict[key] : STRINGS.en[key]) || key;
+  return arg === undefined ? s : s.replace('%s', arg);
+}
+
+/**
+ * Ставит язык интерфейса. Код приходит от площадки («ru», «en», «tr»…) или из
+ * браузера; всё, чего нет в STRINGS, показываем по-английски. Заголовок
+ * вкладки и атрибут lang меняем заодно — их тоже читают.
+ */
+function setLang(code) {
+  const short = String(code || '').slice(0, 2).toLowerCase();
+  lang = STRINGS[short] ? short : 'en';
+  document.documentElement.lang = lang;
+  document.title = t('pageTitle');
+}
+
+// До ответа SDK ориентируемся на браузер: на GitHub Pages и локально другого
+// источника нет, а на площадке язык всё равно перезапишется (см. Yandex.attach).
+setLang((navigator.languages && navigator.languages[0]) || navigator.language);
+
+
+/* =========================================================================
    2. КОНСТАНТЫ
    ========================================================================= */
 const WIN_SCORE    = 100;     // очков до победы
@@ -321,10 +416,10 @@ const NONE = 'NONE', LEFT = 'LEFT', RIGHT = 'RIGHT';
 
 // Уровни сложности бота: интервал удара сжимается по мере набора очков.
 const DIFFICULTY = [
-  { id:'easy',   name:'Легко',   start:0.65, min:0.38, err:0.20 },
-  { id:'normal', name:'Средне',  start:0.48, min:0.24, err:0.12 },
-  { id:'hard',   name:'Сложно',  start:0.36, min:0.16, err:0.050 },
-  { id:'master', name:'Мастер',  start:0.24, min:0.11, err:0.015 }
+  { id:'easy',   key:'diffEasy',   start:0.65, min:0.38, err:0.20 },
+  { id:'normal', key:'diffNormal', start:0.48, min:0.24, err:0.12 },
+  { id:'hard',   key:'diffHard',   start:0.36, min:0.16, err:0.050 },
+  { id:'master', key:'diffMaster', start:0.24, min:0.11, err:0.015 }
 ];
 
 
@@ -357,7 +452,7 @@ function markTutorialSeen() { try { sessionStorage.setItem(TUT_KEY, '1'); } catc
 function makePlayer(index, isBot) {
   return {
     index, isBot,
-    name: isBot ? 'Бот' : (index === 0 ? 'Игрок 1' : 'Игрок 2'),
+    nameKey: isBot ? 'bot' : (index === 0 ? 'p1' : 'p2'),
     segments: [],        // [0] — нижний сегмент, { branch: NONE|LEFT|RIGHT }
     score: 0,
     side: LEFT,          // с какой стороны ствола стоит персонаж
@@ -513,6 +608,8 @@ const Yandex = {
   attach(sdk) {
     this.sdk = sdk;
     this.ready = true;
+    // Требование 2.14: язык интерфейса берём у площадки, а не у браузера.
+    try { setLang(sdk.environment.i18n.lang); } catch (e) { /* оставим язык браузера */ }
     // Реклама сразу после запуска не показывается: отсчёт AD_GAP идёт с
     // начала сессии, а не с нуля.
     this.lastAdTime = Date.now();
@@ -887,7 +984,7 @@ window.addEventListener('orientationchange', () => setTimeout(resize, 120));
 function startGame(newMode) {
   mode = newMode;
   players = [makePlayer(0, false), makePlayer(1, newMode === 'bot')];
-  if (newMode === 'duo') players[1].name = 'Игрок 2';
+  if (newMode === 'duo') players[1].nameKey = 'p2';
   for (const p of players) {
     p.segments = buildTrunk();
     p.botTimer = diff.start;
@@ -2089,7 +2186,7 @@ function drawCountdown() {
     frac  = t - Math.floor(t);           // 1 → 0 внутри одной цифры
     base  = Math.min(L.zw, L.zh) * 0.30;
   } else if (goFlash > 0) {
-    label = 'РУБИ!';
+    label = t('go');
     frac  = goFlash / GO_TIME;
     base  = Math.min(L.zw, L.zh) * 0.20;
   } else {
@@ -2183,27 +2280,27 @@ function drawTitle(title, subtitle) {
 function drawLoading() {
   drawBackground();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  outlinedText('ЛЕСОРУБЫ', W / 2, H * 0.44, Math.min(W * 0.13, H * 0.09, 64));
+  outlinedText(t('title'), W / 2, H * 0.44, Math.min(W * 0.13, H * 0.09, 64));
   ctx.fillStyle = PALETTE.textDim;
   ctx.font = '500 ' + Math.round(Math.min(W * 0.045, 20)) +
              'px system-ui, -apple-system, sans-serif';
-  ctx.fillText('загрузка…', W / 2, H * 0.44 + Math.min(W * 0.10, 52));
+  ctx.fillText(t('loading'), W / 2, H * 0.44 + Math.min(W * 0.10, 52));
 }
 
 function drawMenu() {
   drawBackground();
   buttons = [];
-  drawTitle('ЛЕСОРУБЫ', 'дуэль до ' + WIN_SCORE + ' очков');
+  drawTitle(t('title'), t('subtitle', WIN_SCORE));
 
   const bw = Math.min(W * 0.72, 420);
   const bh = Math.max(BTN_MIN_H, Math.min(H * 0.11, BTN_MAX_H));
   const x = (W - bw) / 2;
   let y = H * 0.42;
-  button(x, y, bw, bh, 'Против бота', 'сложность: ' + diff.name,
+  button(x, y, bw, bh, t('vsBot'), t('vsBotSub', t(diff.key)),
          () => { scene = 'difficulty'; }, true);
   y += bh + BTN_GAP;
-  button(x, y, bw, bh, 'На двоих',
-         L.stacked ? 'один снизу, второй сверху' : 'один экран, два игрока',
+  button(x, y, bw, bh, t('duo'),
+         L.stacked ? t('duoStacked') : t('duoSide'),
          () => startGame('duo'), false);
 
   ctx.fillStyle = PALETTE.textDim;
@@ -2212,11 +2309,8 @@ function drawMenu() {
   // На ПК рубят клавишами: у левого игрока A / D, у правого стрелки. Мышь тоже
   // работает, поэтому про половины зоны говорим и там.
   const hints = DESKTOP
-    ? ['Клавиши: A / D — левый игрок, \u2190 / \u2192 или K / L — правый',
-       'Или мышью по левой и правой половине своей зоны',
-       'Ветка с той же стороны — ошеломление']
-    : ['Тапай по левой или правой половине своей зоны',
-       'Ветка с той же стороны — ошеломление'];
+    ? [t('hintKeys'), t('hintMouse'), t('hintRule')]
+    : [t('hintTap'), t('hintRule')];
   hints.forEach((t, i) => ctx.fillText(t, W / 2, H * 0.88 + i * 22));
 
   // Дата файла игры — мелко в углу. По ней сразу видно, не отдал ли браузер
@@ -2225,14 +2319,14 @@ function drawMenu() {
     ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
     ctx.font = '500 ' + Math.round(Math.min(W * 0.028, 12)) +
                'px system-ui, -apple-system, sans-serif';
-    ctx.fillText('сборка ' + BUILD, W - 10, H - 8);
+    ctx.fillText(t('build', BUILD), W - 10, H - 8);
   }
 }
 
 function drawDifficulty() {
   drawBackground();
   buttons = [];
-  drawTitle('Сложность', null);
+  drawTitle(t('difficulty'), null);
 
   const bw = Math.min(W * 0.72, 420);
   const n  = DIFFICULTY.length;
@@ -2251,10 +2345,10 @@ function drawDifficulty() {
   DIFFICULTY.forEach((d, i) => {
     const col = i % cols, row = (i / cols) | 0;
     button(x0 + col * (cw + BTN_GAP), top + row * (bh + BTN_GAP), cw, bh,
-           d.name, null, () => { diff = d; startGame('bot'); }, d.id === diff.id);
+           t(d.key), null, () => { diff = d; startGame('bot'); }, d.id === diff.id);
     y = top + (row + 1) * (bh + BTN_GAP);
   });
-  button(x0, y, bw, BTN_MIN_H, 'Назад', null, () => { scene = 'menu'; }, false);
+  button(x0, y, bw, BTN_MIN_H, t('back'), null, () => { scene = 'menu'; }, false);
 }
 
 function drawGameOver() {
@@ -2275,7 +2369,7 @@ function drawGameOver() {
     const foe = players[p.index === 0 ? 1 : 0];
     withZone(p, () => {
       const cx = L.zw / 2, cy = L.zh * (L.stacked ? 0.40 : 0.26);
-      const word = p === winner ? 'ПОБЕДА' : 'ПОРАЖЕНИЕ';
+      const word = p === winner ? t('win') : t('lose');
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.font = 'bold ' + big + 'px system-ui, -apple-system, sans-serif';
       // Длинное слово ужимаем, чтобы не упиралось в края зоны.
@@ -2288,9 +2382,9 @@ function drawGameOver() {
 
       // Счёт обоих, свой сверху — так каждый сразу видит собственный результат.
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      outlinedText(p.name + ' — ' + p.score, cx, cy + big * 0.95, big * 0.42,
+      outlinedText(t(p.nameKey) + ' — ' + p.score, cx, cy + big * 0.95, big * 0.42,
                    p === winner ? PALETTE.accent : PALETTE.white);
-      outlinedText(foe.name + ' — ' + foe.score, cx, cy + big * 1.55, big * 0.42,
+      outlinedText(t(foe.nameKey) + ' — ' + foe.score, cx, cy + big * 1.55, big * 0.42,
                    foe === winner ? PALETTE.accent : PALETTE.white);
     });
   }
@@ -2305,10 +2399,10 @@ function drawGameOver() {
   let y = L.stacked ? H / 2 - bh - BTN_GAP / 2 : H * 0.56;
   // Реклама — ровно здесь, между забегами: рестарт и выход в меню. Сам забег
   // ничем не прерывается, а первый забег рекламы не видит (см. lastAdTime).
-  button(x, y, bw, bh, 'Ещё раз', null,
+  button(x, y, bw, bh, t('again'), null,
          () => Yandex.showInterstitial(() => startGame(mode)), true);
   y += bh + BTN_GAP;
-  button(x, y, bw, bh, 'В меню', null,
+  button(x, y, bw, bh, t('toMenu'), null,
          () => Yandex.showInterstitial(() => { scene = 'menu'; }), false);
 }
 
